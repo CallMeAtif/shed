@@ -79,9 +79,9 @@ That run found something the author did not know: the project has **both**
 
 ---
 
-## The five verdicts
+## The six verdicts
 
-`shed` never says "delete this" without saying why, and it distinguishes four
+`shed` never says "delete this" without saying why, and it distinguishes five
 different reasons a dependency might not be deletable.
 
 | Verdict | Meaning |
@@ -90,9 +90,14 @@ different reasons a dependency might not be deletable.
 | **bump** | The replacement exists, but above the floor the project declares in `engines.node`. Reports the version needed. |
 | **blocked** | The code uses API surface the stdlib replacement does not cover. Cites the line. |
 | **unreferenced** | Declared in the manifest, but nothing imports it anywhere `shed` looked. |
+| **tooling** | Never imported, but a package script invokes it by name — `nodemon`, `typescript`, `eslint`. |
 | **unknown** | Not in the knowledge base. `shed` has no opinion and says so. |
 
-`removable`, `bump` and `blocked` are shown by default. `--all` adds the other two.
+`removable`, `bump` and `blocked` are shown by default. `--all` adds the other three.
+
+`tooling` exists because it is this genre of tool's classic false positive. Nothing
+imports `nodemon`, so a naive scan calls it dead and tells you to delete the thing
+that runs your dev server. `shed` reads `scripts` and reclassifies.
 
 The bar for `removable` is deliberately high. A false "you can delete this" costs
 more trust than ten correct ones earn, so every heuristic here is biased toward
@@ -120,7 +125,7 @@ COMMANDS
 
 OPTIONS
       --json            Machine-readable report
-      --fix             (not implemented in 0.1.0)
+      --fix             Remove dependencies nothing imports from package.json
       --node <version>  Judge against this Node version instead of engines.node
       --ignore <pkg>    Exclude a package (repeatable)
   -a, --all             Also show unreferenced and unmapped packages
@@ -129,6 +134,34 @@ OPTIONS
   -h, --help
   -v, --version
 ```
+
+### `--fix`
+
+`--fix` makes exactly one kind of edit: it removes dependencies nothing imports
+from `package.json`, preserving your indentation and key order.
+
+It deliberately does **not** rewrite source code. A codemod turning `chalk.red(x)`
+into `styleText('red', x)` is easy to write and easy to get wrong on the fifth
+variation, and a tool that silently corrupts source is worse than no tool.
+
+Three guards stand between a finding and an edit:
+
+1. only the `unreferenced` verdict qualifies — never `tooling`
+2. the scan must have parsed **every** file cleanly, because one unparsed file
+   could hide the import that makes a package referenced
+3. the rewritten manifest is re-parsed and compared against the intended object
+   before anything is written; a mismatch aborts
+
+```
+$ shed . --fix
+Removed 1 unreferenced dependency from package.json:
+  - uuid
+
+Nothing else was touched. Run your tests, then delete the lockfile entries with
+your package manager.
+```
+
+It does not touch your lockfile — that is your package manager's job.
 
 ### As a CI gate
 
@@ -230,10 +263,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-b766016f0e5b50b9f2b1f9eac026ea812eb6f66ee572f945f2c81d3bfcf276c6  dist/shed.mjs
+316b0a9c286b1313a5469ff55b9bdf2dc92e9df0315e25ae167435f39046fe47  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-b766016f0e5b50b9f2b1f9eac026ea812eb6f66ee572f945f2c81d3bfcf276c6  dist/shed.mjs
+316b0a9c286b1313a5469ff55b9bdf2dc92e9df0315e25ae167435f39046fe47  dist/shed.mjs
 ```
 
 ---
@@ -271,8 +304,8 @@ hyphen ranges, intersection and `||` union are supported. Prerelease handling is
 stricter than node-semver's: a prerelease satisfies a range only when it is at or
 above the range's lower bound. Build metadata is ignored, per spec.
 
-**`--fix` is declared in the help and not implemented in 0.1.0.** It is listed
-because the flag is reserved, not because it works. It does nothing today.
+**`--fix` only edits `package.json`.** It never rewrites source and never touches
+the lockfile. After a fix, run your package manager to prune the lock.
 
 **No `package-lock.json` reading yet.** The impact numbers `shed` reports are
 weekly-download reach, not transitive package counts or install size on disk.
@@ -286,7 +319,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 159 tests, node:test only
+make test      # 177 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:
@@ -304,6 +337,7 @@ src/semver.mjs        version comparison and range satisfaction
 src/gitignore.mjs     .gitignore matching
 src/knowledge.mjs     the 62-entry mapping table — data, not code
 src/analyze.mjs       the verdict engine
+src/fix.mjs           the only edit shed will make, and its three guards
 src/report.mjs        text and JSON renderers
 src/render/           colour, display width, wrapping
 tools/bundle.mjs      the deterministic build

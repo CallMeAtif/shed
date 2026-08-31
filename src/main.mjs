@@ -150,7 +150,8 @@ function applyFix(report, manifestPath, painter, io) {
 
   writeFileSync(manifestPath, result.text);
 
-  const lines = [c.boldGreen(`Removed ${result.removed.length} unreferenced dependencies from package.json:`)];
+  const noun = result.removed.length === 1 ? 'dependency' : 'dependencies';
+  const lines = [c.boldGreen(`Removed ${result.removed.length} unreferenced ${noun} from package.json:`)];
   for (const name of result.removed) lines.push(`  - ${name}`);
   for (const { name, reason } of result.skipped) lines.push(`  ${c.yellow('!')} ${name}: ${reason}`);
   lines.push('', c.dim('Nothing else was touched. Run your tests, then delete the lockfile entries with your package manager.'));
