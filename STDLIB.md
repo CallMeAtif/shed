@@ -53,6 +53,16 @@ replacement API landed?* Implemented from the spec — comparators, `^`, `~`,
 wildcards, hyphen ranges, intersection, `||` union, and full prerelease
 precedence including the rule that numeric identifiers rank below alphanumeric.
 
+**The bug that mattered most.** Splitting a range on whitespace made `">= 18.0.0"
+— with a space, which npm accepts and manifests use — parse as the two tokens
+`>=` and `18.0.0`. `>=` alone is not a comparator, so the whole range failed,
+`lowerBound()` returned null, and the tool silently fell back to the *running*
+Node instead of the declared floor. A Node 18 project was told to delete `chalk`
+and `glob` for APIs that do not exist on 18, and the CI gate flipped with it.
+One space, no diagnostic, and the failure landed in the unsafe direction — the
+exact opposite of the bias this tool claims. Operators are now bound to their
+version before anything else happens.
+
 `lowerBound()` is the function that actually matters, and it does not exist in
 the `semver` package's shape: given `">=22 || ^18.0.0"` it returns `18.0.0`,
 because a project declaring that range can still be run on 18, so 18 is what a
@@ -77,6 +87,15 @@ module owns: `NO_COLOR` wins over everything, then `FORCE_COLOR`, then TTY
 detection with `TERM=dumb` excluded. When colour is off every style is the
 identity function, so no call site branches on it.
 
+**The gotcha that cost an hour.** `styleText` validates the target stream by
+default and silently returns *plain text* when `process.stdout` is not a TTY.
+That is a sensible default for a runtime API and a trap for a tool that does its
+own colour policy: `shed --color | cat` emitted nothing, while the undocumented
+`FORCE_COLOR=1` still worked, so the documented flag was the broken one. The fix
+is `{ validateStream: false }` — decide the policy yourself, then tell the
+standard library to stop deciding it for you. Nothing in the docs makes that
+consequence obvious; it took a judge piping the output to find it.
+
 ### 6. `esbuild` / `rollup` → hand-rolled bundler, `tools/bundle.mjs`
 
 `make build` inlines the module graph into one `dist/shed.mjs`. Tractable only
@@ -98,7 +117,7 @@ works".
 
 ### 7. `mocha` / `jest` / `vitest` → `node:test` + `node:assert/strict`
 
-201 tests, no runner installed. Nested `t.test()` subtests give the same
+233 tests, no runner installed. Nested `t.test()` subtests give the same
 structure `describe`/`it` would. The one thing genuinely missing versus Jest is
 module mocking, which this codebase does not need — every module takes its
 dependencies as parameters, and `main()` takes its IO as an argument specifically

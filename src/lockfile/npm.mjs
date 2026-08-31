@@ -22,6 +22,7 @@
  * @property {boolean} hasInstallScript  runs code at install time
  * @property {boolean} dev
  * @property {string[]} deps    names this package depends on
+ * @property {string[]} peers   names this package requires as peers
  */
 
 /** @typedef {{ nodes: Map<string, LockNode>, roots: string[], version: number }} Lock */
@@ -64,6 +65,10 @@ export function parseNpmLock(text) {
         ...Object.keys(entry.dependencies ?? {}),
         ...Object.keys(entry.optionalDependencies ?? {}),
       ],
+      // Peers are NOT dependency edges - the consumer installs them - but they
+      // are the reason a package like react-dom sits in a manifest that never
+      // imports it. Kept separate so reachability stays correct.
+      peers: Object.keys(entry.peerDependencies ?? {}),
     });
   }
 
@@ -156,4 +161,24 @@ export function removalImpact(lock, removed) {
     .sort((a, b) => (a.name < b.name ? -1 : 1));
 
   return { packages, installScripts: packages.filter((node) => node.hasInstallScript) };
+}
+
+/**
+ * Every package name some installed package requires as a peer.
+ *
+ * A peer dependency is declared by the manifest and imported by nobody: `next`
+ * requires `react-dom`, so `react-dom` is in your dependencies and appears in
+ * none of your source. An import-based scan calls that dead, and deleting it
+ * breaks the build - which is exactly what shed used to do.
+ *
+ * @param {Lock} lock
+ * @returns {Set<string>}
+ */
+export function peerRequirements(lock) {
+  /** @type {Set<string>} */
+  const required = new Set();
+  for (const node of lock.nodes.values()) {
+    for (const peer of node.peers) required.add(peer);
+  }
+  return required;
 }

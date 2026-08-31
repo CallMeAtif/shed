@@ -12,8 +12,10 @@
  *
  *   1. only the `unreferenced` verdict qualifies - never `tooling`, which is the
  *      dependency a package script invokes by name
- *   2. the whole scan must have parsed cleanly; one unparsed file could hide the
- *      import that makes a package referenced
+ *   2. the whole scan must have accounted for every file. A parse error, a file
+ *      skipped for size, or a JSX file whose text shed cannot tokenise all mean
+ *      an import could be hiding where nobody looked - and an unexamined file is
+ *      exactly as dangerous as an unparsed one
  *   3. the rewritten manifest is re-parsed and compared against the intended
  *      object before it is written, so a bad edit aborts instead of landing
  *
@@ -70,7 +72,11 @@ export function removeDependencies(text, targets) {
   for (const { name, field } of targets) {
     const index = findEntryLine(lines, field, name);
     if (index === -1) {
-      skipped.push({ name, reason: `could not locate "${name}" in ${field}` });
+      skipped.push({
+        name,
+        reason: `no line of its own in "${field}" - shed edits line-wise to preserve `
+          + 'formatting, so a block written on a single line is left alone',
+      });
       continue;
     }
     if (!/,\s*$/.test(lines[index])) {
@@ -108,15 +114,22 @@ export function removeDependencies(text, targets) {
  *
  * @param {import('./analyze.mjs').Finding[]} findings
  * @param {number} parseErrors
+ * @param {string[]} [blockers] other reasons the scan may be incomplete
  * @returns {{ targets: { name: string, field: string }[], refusal: string|null }}
  */
-export function planFix(findings, parseErrors) {
-  if (parseErrors > 0) {
+export function planFix(findings, parseErrors, blockers = []) {
+  /** @type {string[]} */
+  const reasons = [];
+  if (parseErrors > 0) reasons.push(`${parseErrors} file(s) did not parse cleanly`);
+  reasons.push(...blockers);
+
+  if (reasons.length > 0) {
     return {
       targets: [],
       refusal:
-        `refusing to edit: ${parseErrors} file(s) did not parse cleanly, and an unparsed ` +
-        'file could hide the import that makes a package referenced. Run with --json to see them.',
+        `refusing to edit: ${reasons.join('; ')}. An import hiding in a file shed did not ` +
+        'fully read would make one of these packages referenced, so it will not guess. ' +
+        'Run with --json to see the detail.',
     };
   }
   return {

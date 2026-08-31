@@ -27,6 +27,11 @@ const SECTIONS = {
  */
 export function renderText(report, { painter, all = false, quiet = false, width = 100 }) {
   const c = painter;
+
+  // --quiet is for CI, where the exit code carries the signal and one line of
+  // context is all a log needs. Strictly one line, as the help promises.
+  if (quiet) return renderSummary(report, c).split('\n')[0];
+
   const out = [];
 
   const name = report.project.name ?? '(unnamed project)';
@@ -35,7 +40,9 @@ export function renderText(report, { painter, all = false, quiet = false, width 
     `${c.bold('shed')} ${c.dim(report.version)}  ${c.dim('·')}  ${c.bold(name)}  ${c.dim('·')}  ` +
     `Node floor ${c.cyan(report.node.version)} ${c.dim(`(${floorNote[report.node.source]})`)}`,
   );
-  out.push(c.dim(`scanned ${report.scanned} files, ${report.totals.declared} declared dependencies`));
+  const fileNoun = report.scanned === 1 ? 'file' : 'files';
+  const depNoun = report.totals.declared === 1 ? 'dependency' : 'dependencies';
+  out.push(c.dim(`scanned ${report.scanned} ${fileNoun}, ${report.totals.declared} declared ${depNoun}`));
 
   const visible = all ? new Set(VERDICT_ORDER) : DEFAULT_VERDICTS;
 
@@ -101,19 +108,47 @@ function renderSummary(report, c) {
     `${byVerdict.removable} ${noun} the standard library already replaces` +
     (weeklyRemovable > 0 ? `, worth ~${humanCount(weeklyRemovable)} weekly downloads.` : '.'),
   );
-  return report.impact?.packages > 0 ? `${headline}\n${renderImpact(report.impact, c)}` : headline;
+  const impact = renderImpact(report.impact, byVerdict, c);
+  return impact ? `${headline}\n${impact}` : headline;
 }
 
 /**
  * The lockfile-derived cost of the packages that could go.
- * @param {{ packages: number, installScripts: number, names: string[] }} impact
+ *
+ * The removable set and the unreferenced set are reported separately and
+ * labelled, because the sentence sits under a headline whose subject is the
+ * removable count alone.
+ *
+ * @param {object|null} impact
+ * @param {Record<string, number>} byVerdict
  */
-function renderImpact(impact, c) {
-  const noun = impact.packages === 1 ? 'package' : 'packages';
-  const scripts = impact.installScripts > 0
-    ? `, ${impact.installScripts} of which ${impact.installScripts === 1 ? 'runs' : 'run'} an install script (${impact.names.join(', ')})`
-    : '';
-  return c.dim(`Removing them takes ${impact.packages} ${noun} out of node_modules${scripts}.`);
+function renderImpact(impact, byVerdict, c) {
+  if (!impact) return '';
+  const lines = [];
+
+  if (impact.removable.packages > 0) {
+    lines.push(c.dim(`Removing them takes ${count(impact.removable)} out of node_modules${scripts(impact.removable)}.`));
+  }
+  if (impact.unreferenced.packages > 0) {
+    const n = byVerdict.unreferenced;
+    lines.push(c.dim(
+      `The ${n} unreferenced package${n === 1 ? '' : 's'} would take a further ` +
+      `${count(impact.unreferenced)}${scripts(impact.unreferenced)}.`,
+    ));
+  }
+  return lines.join('\n');
+}
+
+/** @param {{ packages: number }} part */
+function count(part) {
+  return `${part.packages} package${part.packages === 1 ? '' : 's'}`;
+}
+
+/** @param {{ installScripts: number, names: string[] }} part */
+function scripts(part) {
+  if (part.installScripts === 0) return '';
+  const verb = part.installScripts === 1 ? 'runs' : 'run';
+  return `, ${part.installScripts} of which ${verb} an install script (${part.names.join(', ')})`;
 }
 
 /**
@@ -132,6 +167,7 @@ export function toJSON(report) {
     scanned: report.scanned,
     totals: report.totals,
     impact: report.impact,
+    blockers: report.blockers,
     findings: report.findings.map((f) => ({
       name: f.name,
       range: f.range,

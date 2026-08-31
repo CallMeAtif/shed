@@ -43,13 +43,20 @@ const isDigit = (c) => c >= '0' && c <= '9';
  *
  * @param {string} source
  * @param {string} file path used in diagnostics
- * @returns {{ tokens: Token[], errors: Diagnostic[] }}
+ * @returns {{ tokens: Token[], errors: Diagnostic[], comments: [number, number][] }}
  */
 export function tokenize(source, file) {
   /** @type {Token[]} */
   const tokens = [];
   /** @type {Diagnostic[]} */
   const errors = [];
+  /**
+   * Half-open [start, end) offsets of every comment. The scanner already knows
+   * precisely what is a comment; exposing it lets other passes stop treating
+   * prose as code.
+   * @type {[number, number][]}
+   */
+  const comments = [];
 
   // A stack entry per template literal we are inside. `braceDepth` counts the
   // plain `{` blocks opened within the current `${}`, so that the `}` which ends
@@ -138,12 +145,15 @@ export function tokenize(source, file) {
     }
 
     if (c === '/' && source[i + 1] === '/') {
+      const from = i;
       while (i < source.length && source[i] !== '\n') bump();
+      comments.push([from, i]);
       continue;
     }
 
     if (c === '/' && source[i + 1] === '*') {
       const start = here();
+      const from = i;
       bumpN(2);
       let closed = false;
       while (i < source.length) {
@@ -155,6 +165,7 @@ export function tokenize(source, file) {
         bump();
       }
       if (!closed) fail('unterminated block comment', start);
+      comments.push([from, i]);
       continue;
     }
 
@@ -269,24 +280,33 @@ export function tokenize(source, file) {
     fail('unterminated template literal', { file, line, col, offset: i });
   }
 
-  return { tokens, errors };
+  return { tokens, errors, comments };
 }
 
 /** @typedef {'static'|'dynamic'|'require'|'export-from'} ImportKind */
 /** @typedef {{ specifier: string, kind: ImportKind, line: number, col: number, offset: number }} FoundImport */
 
-/** How far past an `import`/`export` keyword to look for its `from` clause. */
-const CLAUSE_LOOKAHEAD = 200;
+/**
+ * Tokens that may legally appear inside an import or export *clause* - the part
+ * between the keyword and `from`.
+ *
+ * Bounding the search by the grammar rather than by a token count is what makes
+ * this correct in both directions. A fixed lookahead both truncates long clauses
+ * (an import of eighty aliased names silently disappears, and a tool that then
+ * offers to delete the dependency is worse than useless) and runs past the end
+ * of a semicolon-less `export { a }` into the next statement's specifier.
+ */
+const CLAUSE_PUNCT = new Set(['{', '}', ',', '*']);
 
 /**
  * Read module specifiers out of a token stream.
  *
  * @param {string} source
  * @param {string} file
- * @returns {{ imports: FoundImport[], errors: Diagnostic[] }}
+ * @returns {{ imports: FoundImport[], errors: Diagnostic[], comments: [number, number][] }}
  */
 export function extractImports(source, file) {
-  const { tokens, errors } = tokenize(source, file);
+  const { tokens, errors, comments } = tokenize(source, file);
   /** @type {FoundImport[]} */
   const imports = [];
 
@@ -295,16 +315,50 @@ export function extractImports(source, file) {
     imports.push({ specifier: token.value, kind, line: token.line, col: token.col, offset: token.offset });
   };
 
-  /** Find the `from 'spec'` that closes an import or export clause. */
+  /**
+   * Find the `from 'spec'` that closes an import or export clause, walking only
+   * over tokens the clause grammar permits. Anything else means this was not a
+   * from-clause, so the search stops rather than guessing.
+   */
   const findFromClause = (start) => {
-    const limit = Math.min(tokens.length, start + CLAUSE_LOOKAHEAD);
-    for (let j = start; j < limit; j++) {
+    let depth = 0;
+    let braceClosed = false;
+
+    for (let j = start; j < tokens.length; j++) {
       const token = tokens[j];
-      if (token.type === 'punct' && token.value === ';') return null;
-      if (token.type === 'ident' && token.value === 'from') {
+
+      // Once the named-bindings group has closed, the only thing that may
+      // follow is `from`. Without this, a semicolon-less `export { a }` walks
+      // into the next statement and steals its specifier.
+      if (braceClosed) {
+        if (token.type !== 'ident' || token.value !== 'from') return null;
         const next = tokens[j + 1];
         return next?.type === 'string' ? next : null;
       }
+
+      if (token.type === 'punct') {
+        if (token.value === '{') {
+          depth++;
+          continue;
+        }
+        if (token.value === '}') {
+          depth--;
+          if (depth < 0) return null;
+          if (depth === 0) braceClosed = true;
+          continue;
+        }
+        if (CLAUSE_PUNCT.has(token.value)) continue; // ',' or '*'
+        return null; // a semicolon, an operator, a literal
+      }
+
+      if (token.type !== 'ident') return null;
+      if (depth > 0) continue; // inside the braces: names and aliases
+
+      if (token.value === 'from') {
+        const next = tokens[j + 1];
+        return next?.type === 'string' ? next : null;
+      }
+      // A default-import name, a namespace alias, `as`, or `type`.
     }
     return null;
   };
@@ -337,7 +391,15 @@ export function extractImports(source, file) {
     }
 
     if (token.value === 'export') {
-      const clause = findFromClause(index + 1);
+      // Only `export { ... } from` and `export * from` re-export. A declaration
+      // form (`export const`, `export default`, `export function`) has no
+      // specifier, and scanning past it would bind to the next statement's.
+      let at = index + 1;
+      if (tokens[at]?.type === 'ident' && tokens[at].value === 'type') at++;
+      const head = tokens[at];
+      const isClause = head?.type === 'punct' && (head.value === '{' || head.value === '*');
+      if (!isClause) continue;
+      const clause = findFromClause(at);
       if (clause) record(clause, 'export-from');
       continue;
     }
@@ -348,7 +410,7 @@ export function extractImports(source, file) {
     }
   }
 
-  return { imports, errors };
+  return { imports, errors, comments };
 }
 
 /**

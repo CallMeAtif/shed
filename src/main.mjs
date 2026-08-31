@@ -12,11 +12,11 @@ import { parse, helpText } from './cli.mjs';
 import { colorEnabled, createPainter } from './render/ansi.mjs';
 import { analyze, humanCount, VERDICT_ORDER } from './analyze.mjs';
 import { renderText, toJSON } from './report.mjs';
-import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText } from './project.mjs';
+import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText, impliedTooling } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 import { planFix, removeDependencies } from './fix.mjs';
-import { parseNpmLock, removalImpact } from './lockfile/npm.mjs';
+import { parseNpmLock, removalImpact, peerRequirements } from './lockfile/npm.mjs';
 
 /**
  * Replaced with a literal by tools/bundle.mjs, so the built artifact carries its
@@ -100,13 +100,26 @@ function runScan(positionals, painter, io, flags) {
   const walk = walkSource(dir, loadIgnore(dir, Ignore));
   const floor = resolveNodeFloor(pkg, flags.node);
 
-  const analysis = analyze({ dir, pkg, files: walk.files, floor, ignore, configText: loadConfigText(dir, pkg) });
+  const { lock } = loadLockfile(dir, parseNpmLock);
+  const analysis = analyze({
+    dir,
+    pkg,
+    files: walk.files,
+    floor,
+    ignore,
+    configText: loadConfigText(dir, pkg),
+    peers: new Set([
+      ...(lock ? peerRequirements(lock) : []),
+      ...impliedTooling(dir, walk.files),
+    ]),
+  });
   const report = {
     version: VERSION,
     project: { dir, name: pkg.name ?? null, version: pkg.version ?? null },
     node: floor,
     ...analysis,
-    impact: measureImpact(dir, analysis.findings),
+    impact: measureImpact(lock, analysis.findings),
+    blockers: scanBlockers(walk, analysis),
   };
 
   if (flags.fix) return applyFix(report, manifestPath, painter, io);
@@ -137,21 +150,55 @@ function runScan(positionals, painter, io, flags) {
  * @param {import('./analyze.mjs').Finding[]} findings
  * @returns {{ packages: number, installScripts: number, names: string[] }|null}
  */
-function measureImpact(dir, findings) {
-  const { lock } = loadLockfile(dir, parseNpmLock);
+function measureImpact(lock, findings) {
   if (!lock) return null;
 
-  const candidates = findings
-    .filter((f) => f.verdict === 'removable' || f.verdict === 'unreferenced')
-    .map((f) => f.name);
-  if (candidates.length === 0) return { packages: 0, installScripts: 0, names: [] };
+  const removable = findings.filter((f) => f.verdict === 'removable').map((f) => f.name);
+  const unreferenced = findings.filter((f) => f.verdict === 'unreferenced').map((f) => f.name);
 
-  const { packages, installScripts } = removalImpact(lock, candidates);
-  return {
-    packages: packages.length,
-    installScripts: installScripts.length,
-    names: installScripts.map((node) => node.name),
+  /** @param {string[]} names */
+  const measure = (names) => {
+    if (names.length === 0) return { packages: 0, installScripts: 0, names: [] };
+    const { packages, installScripts } = removalImpact(lock, names);
+    return {
+      packages: packages.length,
+      installScripts: installScripts.length,
+      names: installScripts.map((node) => node.name),
+    };
   };
+
+  // Measured separately because the headline sentence is about the removable
+  // set alone. Folding the unreferenced packages into one number attributed
+  // that total to the wrong subject, and inflated it roughly fourfold.
+  return {
+    removable: measure(removable),
+    unreferenced: measure(unreferenced),
+    both: measure([...removable, ...unreferenced]),
+  };
+}
+
+/**
+ * Reasons the scan may not have seen every import, which `--fix` treats as
+ * disqualifying. A file shed skipped is exactly as dangerous as one it failed to
+ * parse: either way an import could be hiding in it.
+ *
+ * @param {{ files: string[], skipped: { path: string, reason: string }[] }} walk
+ * @param {{ errors: unknown[] }} analysis
+ * @returns {string[]}
+ */
+function scanBlockers(walk, analysis) {
+  const blockers = [];
+  if (walk.skipped.length > 0) {
+    blockers.push(`${walk.skipped.length} file(s) were skipped and never read`);
+  }
+  const jsx = walk.files.filter((file) => file.endsWith('.jsx') || file.endsWith('.tsx'));
+  if (jsx.length > 0) {
+    blockers.push(
+      `${jsx.length} JSX file(s) were scanned, and shed does not tokenise JSX text, ` +
+      'so an import inside a JSX expression can be missed',
+    );
+  }
+  return blockers;
 }
 
 /**
@@ -160,7 +207,7 @@ function measureImpact(dir, findings) {
  */
 function applyFix(report, manifestPath, painter, io) {
   const c = painter;
-  const { targets, refusal } = planFix(report.findings, report.errors.length);
+  const { targets, refusal } = planFix(report.findings, report.errors.length, report.blockers);
 
   if (refusal) {
     io.stderr(`shed: ${refusal}`);
@@ -182,10 +229,14 @@ function applyFix(report, manifestPath, painter, io) {
   writeFileSync(manifestPath, result.text);
 
   const noun = result.removed.length === 1 ? 'dependency' : 'dependencies';
-  const lines = [c.boldGreen(`Removed ${result.removed.length} unreferenced ${noun} from package.json:`)];
+  const lines = result.removed.length === 0
+    ? [c.bold('Nothing was removed.')]
+    : [c.boldGreen(`Removed ${result.removed.length} unreferenced ${noun} from package.json:`)];
   for (const name of result.removed) lines.push(`  - ${name}`);
   for (const { name, reason } of result.skipped) lines.push(`  ${c.yellow('!')} ${name}: ${reason}`);
-  lines.push('', c.dim('Nothing else was touched. Run your tests, then delete the lockfile entries with your package manager.'));
+  if (result.removed.length > 0) {
+    lines.push('', c.dim('Nothing else was touched. Run your tests, then delete the lockfile entries with your package manager.'));
+  }
   io.stdout(lines.join('\n'));
   return 0;
 }

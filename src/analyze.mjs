@@ -40,25 +40,41 @@ const MAX_EVIDENCE = 8;
 /**
  * Find uses of API surface the stdlib replacement does not cover.
  *
- * This is a substring probe over the file's text, not a semantic analysis: it can
- * fire on a caveat mentioned inside a comment. That bias is deliberate - a false
- * "blocked" merely leaves a dependency in place, while a false "removable" breaks
- * someone's build.
+ * Still a substring probe rather than a semantic analysis, but comments are
+ * blanked first using the ranges the tokenizer already computed - citing a
+ * mention in prose as proof of API usage was the weakest evidence shed printed.
+ * The remaining bias is deliberate: a false "blocked" merely leaves a dependency
+ * in place, while a false "removable" breaks someone's build.
  *
  * @param {string} text
  * @param {string} file
  * @param {string[]} caveats
+ * @param {[number, number][]} comments half-open offset ranges to ignore
  * @returns {CaveatHit[]}
  */
-function probeCaveats(text, file, caveats) {
+function probeCaveats(text, file, caveats, comments) {
+  // Replacing comment bytes with spaces keeps every offset, line and column
+  // identical, so positions stay truthful without a second pass.
+  let code = text;
+  for (const [start, end] of comments) {
+    code = code.slice(0, start) + ' '.repeat(end - start) + code.slice(end);
+  }
+
   /** @type {CaveatHit[]} */
   const hits = [];
-  const lines = text.split(/\r?\n/);
+  /** @type {Set<number>} */
+  const seenLines = new Set();
+  const lines = code.split(/\r?\n/);
+  const original = text.split(/\r?\n/);
+
   for (let i = 0; i < lines.length; i++) {
     for (const caveat of caveats) {
       const col = lines[i].indexOf(caveat);
       if (col === -1) continue;
-      hits.push({ file, line: i + 1, col: col + 1, caveat, text: lines[i].trim() });
+      // One line is one piece of evidence, however many caveats it contains.
+      if (seenLines.has(i)) continue;
+      seenLines.add(i);
+      hits.push({ file, line: i + 1, col: col + 1, caveat, text: original[i].trim() });
     }
   }
   return hits;
@@ -141,9 +157,10 @@ function namedInConfig(configText, name) {
  * @param {{ version: string, source: string }} options.floor
  * @param {Set<string>} [options.ignore] package names to leave out entirely
  * @param {string} [options.configText] text where a package may be named without being imported
+ * @param {Set<string>} [options.peers] names required as a peer, or implied by the project's shape
  * @returns {{ findings: Finding[], errors: import('./errors.mjs').Diagnostic[], scanned: number, totals: object }}
  */
-export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText = '' }) {
+export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText = '', peers = new Set() }) {
   const declared = declaredDependencies(pkg);
 
   /** @type {Map<string, Site[]>} */
@@ -183,7 +200,7 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
     for (const name of inThisFile) {
       const entry = lookup(name);
       if (!entry?.caveats?.length) continue;
-      const hits = probeCaveats(text, file, entry.caveats);
+      const hits = probeCaveats(text, file, entry.caveats, found.comments);
       if (!hits.length) continue;
       if (!caveatHits.has(name)) caveatHits.set(name, []);
       caveatHits.get(name).push(...hits);
@@ -202,15 +219,18 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
     const scripts = scriptsUsing(pkg, name);
     const byName = TOOLING_BY_NAME.some((pattern) => pattern.test(name));
     const inConfig = namedInConfig(configText, name);
+    const isPeer = peers.has(name);
 
     /** @type {Verdict} */
     let verdict;
     let because;
 
-    if (found.length === 0 && (scripts.length > 0 || byName || inConfig)) {
+    if (found.length === 0 && (scripts.length > 0 || byName || inConfig || isPeer)) {
       verdict = 'tooling';
       if (scripts.length > 0) {
         because = `nothing imports it, but ${scripts.map((s) => `scripts.${s}`).join(' and ')} runs it`;
+      } else if (isPeer) {
+        because = 'nothing imports it, but the project requires it as a peer or a toolchain';
       } else if (byName) {
         because = 'nothing imports it, and nothing should - this kind of package is resolved by name';
       } else {

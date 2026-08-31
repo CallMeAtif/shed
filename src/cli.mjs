@@ -59,7 +59,7 @@ export const OPTIONS = {
     type: 'boolean',
     negatable: true,
     placeholder: '',
-    help: 'Force colour on or off (default: auto-detect, honours NO_COLOR)',
+    help: 'Force colour on or off; otherwise NO_COLOR, FORCE_COLOR, then TTY decide',
   },
   quiet: {
     type: 'boolean',

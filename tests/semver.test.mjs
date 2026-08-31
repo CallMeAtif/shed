@@ -105,3 +105,42 @@ test('lowerBound is the floor a recommendation has to clear', async (t) => {
     assert.equal(lowerBound('<20.0.0'), null);
   });
 });
+
+test('range whitespace, which used to fall back to the running Node silently', async (t) => {
+  await t.test('a space between an operator and its version is the same range', () => {
+    for (const range of ['>= 18.0.0', '>=  18.0.0', '^ 18.0.0', '> 18.0.0']) {
+      assert.notEqual(lowerBound(range), null, range);
+    }
+    assert.equal(lowerBound('>= 18.0.0'), '18.0.0');
+    assert.equal(lowerBound('^ 1.2.3'), '1.2.3');
+  });
+
+  await t.test('spaces survive intersection and union', () => {
+    assert.equal(lowerBound('> 1.2.3 < 2.0.0'), '1.2.3');
+    assert.equal(lowerBound('^18.0.0 || >= 20'), '18.0.0');
+    assert.equal(lowerBound('1.2.3 || >= 2.0.0'), '1.2.3');
+  });
+
+  await t.test('build metadata is accepted and ignored', () => {
+    assert.equal(lowerBound('1.2.3+build'), '1.2.3');
+    assert.equal(lowerBound('>=1.2.3+build.7'), '1.2.3');
+  });
+
+  await t.test('satisfies agrees with the spaced form', () => {
+    assert.equal(satisfies('20.0.0', '>= 18.0.0'), true);
+    assert.equal(satisfies('17.0.0', '>= 18.0.0'), false);
+  });
+});
+
+test('an empty alternative must not match everything', async (t) => {
+  await t.test('a dangling || is malformed, not a wildcard', () => {
+    for (const range of ['||', '>=1.2.3||', ' || ', '|| >=1.0.0']) {
+      assert.equal(satisfies('99.0.0', range), false, range);
+    }
+  });
+
+  await t.test('but a genuinely empty range still means any version', () => {
+    assert.equal(satisfies('99.0.0', ''), true);
+    assert.equal(satisfies('99.0.0', '*'), true);
+  });
+});

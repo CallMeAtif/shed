@@ -352,3 +352,119 @@ test('packages that are never imported but must not be removed', async (t) => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+test('caveat evidence quality', async (t) => {
+  await t.test('a caveat mentioned only in a comment does not block the swap', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0' } },
+      { 'src/a.js': "import chalk from 'chalk';\n// we used to call chalk.hex('#fff') here\nexport default chalk.red('x');\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir).json.findings.find((f) => f.name === 'chalk').verdict, 'removable');
+  });
+
+  await t.test('but real usage still blocks it', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0' } },
+      { 'src/a.js': "import chalk from 'chalk';\nexport default chalk.hex('#fff')('x');\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir).json.findings.find((f) => f.name === 'chalk').verdict, 'blocked');
+  });
+
+  await t.test('a line with two caveats is cited once, not twice', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, dependencies: { axios: '^1.0.0' } },
+      { 'src/a.js': "import axios from 'axios';\nconst c = axios.create({ interceptors: {} });\nexport default c;\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const finding = report(dir).json.findings.find((f) => f.name === 'axios');
+    const lines = finding.caveats.map((h) => `${h.file}:${h.line}`);
+    assert.deepEqual(lines, [...new Set(lines)]);
+  });
+});
+
+test('packages the manifest declares that no import can vouch for', async (t) => {
+  await t.test('a peer requirement of an installed package is tooling', () => {
+    const dir = makeProject(
+      { name: 'site', engines: { node: '>=22.0.0' }, dependencies: { next: '^14.0.0', 'react-dom': '^18.0.0' } },
+      {
+        'src/a.js': 'export default 1;\n',
+        'package-lock.json': JSON.stringify({
+          lockfileVersion: 3,
+          packages: {
+            '': { dependencies: { next: '^14.0.0', 'react-dom': '^18.0.0' } },
+            'node_modules/next': { version: '14.0.0', peerDependencies: { 'react-dom': '^18.0.0' } },
+            'node_modules/react-dom': { version: '18.0.0' },
+          },
+        }),
+      },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const finding = report(dir, ['--all']).json.findings.find((f) => f.name === 'react-dom');
+    assert.equal(finding.verdict, 'tooling');
+    assert.match(finding.because, /peer|toolchain/);
+  });
+
+  await t.test('typescript is implied by a tsconfig, not by anything naming it', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, devDependencies: { typescript: '^5.0.0' } },
+      { 'src/a.ts': 'export default 1;\n', 'tsconfig.json': '{}\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir, ['--all']).json.findings.find((f) => f.name === 'typescript').verdict, 'tooling');
+  });
+
+  await t.test('a <name>.config.js file implies <name>', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, devDependencies: { tailwindcss: '^3.0.0' } },
+      { 'src/a.js': 'export default 1;\n', 'tailwind.config.js': 'module.exports = {};\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir, ['--all']).json.findings.find((f) => f.name === 'tailwindcss').verdict, 'tooling');
+  });
+
+  await t.test('a .<name>rc file implies <name>', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, devDependencies: { eslint: '^8.0.0' } },
+      { 'src/a.js': 'export default 1;\n', '.eslintrc.json': '{}\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir, ['--all']).json.findings.find((f) => f.name === 'eslint').verdict, 'tooling');
+  });
+});
+
+test('impact is attributed to the set it actually describes', async (t) => {
+  const dir = makeProject(
+    { name: 'fixture', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0', unused: '^1.0.0' } },
+    {
+      'src/a.js': "import chalk from 'chalk';\nexport default chalk;\n",
+      'package-lock.json': JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          '': { dependencies: { chalk: '^5.0.0', unused: '^1.0.0' } },
+          'node_modules/chalk': { version: '5.0.0' },
+          'node_modules/unused': { version: '1.0.0', dependencies: { 'unused-dep': '^1.0.0' } },
+          'node_modules/unused-dep': { version: '1.0.0' },
+        },
+      }),
+    },
+  );
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const { json } = report(dir);
+
+  await t.test('the removable set is counted on its own', () => {
+    assert.equal(json.impact.removable.packages, 1);
+  });
+
+  await t.test('the unreferenced set is counted separately, not folded in', () => {
+    assert.equal(json.impact.unreferenced.packages, 2);
+  });
+
+  await t.test('the headline sentence only claims the removable figure', () => {
+    const { stdout } = run([dir]);
+    assert.match(stdout, /Removing them takes 1 package out of node_modules/);
+    assert.match(stdout, /would take a further 2 packages/);
+  });
+});

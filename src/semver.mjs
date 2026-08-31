@@ -6,6 +6,10 @@
  * "is this project's declared Node floor at least the version where the
  * replacement API landed?" - and the README says exactly which subset that is.
  *
+ * Whitespace between an operator and its version is normalised first, so
+ * ">= 1.2.3" and ">=1.2.3" are the same range. Build metadata is accepted and
+ * ignored, per the semver spec.
+ *
  * Supported range grammar:
  *   comparators      >=1.2.3  >1.2.3  <=1.2.3  <1.2.3  =1.2.3  1.2.3
  *   caret and tilde  ^1.2.3  ~1.2.3
@@ -95,7 +99,7 @@ function expandToken(token) {
   const [, op = '', rest] = opMatch;
 
   // Partial versions (1, 1.2, 1.x) define an implicit range rather than a point.
-  const partial = /^v?(\d+)(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:-([0-9A-Za-z.-]+))?$/.exec(rest);
+  const partial = /^v?(\d+)(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(rest);
   if (!partial) return null;
   const major = Number(partial[1]);
   const minorRaw = partial[2];
@@ -145,9 +149,21 @@ function expandToken(token) {
  * @returns {Comparator[][]|null} null when any alternative fails to parse
  */
 export function parseRange(range) {
+  // ">= 18.0.0" is valid and common, but splitting on whitespace would make ">="
+  // a token of its own and fail the whole range - which used to fall back to the
+  // running Node silently, flipping verdicts toward "removable". Bind each
+  // operator to the version it qualifies before anything else happens.
+  const text = String(range).replace(/\s+/g, ' ').replace(/(>=|<=|>|<|=|\^|~)\s+/g, '$1');
+
+  // An empty range means "any version"; an empty *alternative* ("||", ">=1 ||")
+  // is malformed, and must not be read as a comparator set that matches
+  // everything.
+  if (text.trim() === '') return [[]];
+
   /** @type {Comparator[][]} */
   const alternatives = [];
-  for (const alt of String(range).split('||')) {
+  for (const alt of text.split('||')) {
+    if (alt.trim() === '') return null;
     // Hyphen ranges bind looser than intersection, so resolve them before splitting.
     const hyphen = /^\s*(\S+)\s+-\s+(\S+)\s*$/.exec(alt);
     if (hyphen) {

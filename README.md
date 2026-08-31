@@ -34,7 +34,9 @@ Run it straight from source if you prefer: `node bin/shed.mjs /path/to/project`.
 
 ## What it looks like
 
-Against a small Express API found on the author's laptop:
+Against a small Express API found on the author's laptop (the project is
+unnamed on disk; `api-server` is substituted here for readability, and is the
+only edit to this transcript):
 
 ```
 shed 0.1.0  ·  api-server  ·  Node floor 24.4.1 (assumed from the running Node)
@@ -60,24 +62,25 @@ REMOVABLE (4) - the standard library covers every use shed can see
 
 BLOCKED (1) - the code uses something the replacement does not cover
   express                 35M/wk      node:http
-    node:http does not cover app.use(, express.Router
+    node:http does not cover app.use(, app.get(, res.json(, app.listen(, express.Router
     index.js:10 app.use(cors());
     index.js:11 app.use(helmet());
     index.js:12 app.use(cookieParser());
-    … and 4 more
-
-UNREFERENCED (3) - declared, but nothing imports it
-  jsonwebtoken            18M/wk      crypto.createHmac + base64url
-  bcrypt                  3M/wk       crypto.scrypt()
-  nodemailer
+    … and 7 more
 
 4 dependencies the standard library already replaces, worth ~35M weekly downloads.
-Removing them takes 23 packages out of node_modules, 1 of which runs an install
-script (bcrypt).
+Removing them takes 6 packages out of node_modules.
+The 3 unreferenced packages would take a further 17 packages, 1 of which runs an
+install script (bcrypt).
 ```
 
 That run found something the author did not know: the project has **both**
-`bcrypt` and `bcryptjs` installed and imports only one of them.
+`bcrypt` and `bcryptjs` installed and imports only one of them. (`bcrypt` is
+among the unreferenced packages, which `--all` lists.)
+
+Note what the last two lines do **not** do: they keep the removable set and the
+unreferenced set apart. Folding them into one figure would have credited four
+packages with a saving that seven produce.
 
 ---
 
@@ -92,7 +95,7 @@ different reasons a dependency might not be deletable.
 | **bump** | The replacement exists, but above the floor the project declares in `engines.node`. Reports the version needed. |
 | **blocked** | The code uses API surface the stdlib replacement does not cover. Cites the line. |
 | **unreferenced** | Declared in the manifest, but nothing imports it anywhere `shed` looked. |
-| **tooling** | Never imported, and never should be — a script runs it, a config names it, or its name says so (`@types/*`, `eslint-plugin-*`). |
+| **tooling** | Never imported, and never should be — a script runs it, a config names it, another package requires it as a peer, the project shape implies it (`tsconfig.json` ⇒ `typescript`), or its name says so (`@types/*`, `eslint-plugin-*`). |
 | **unknown** | Not in the knowledge base. `shed` has no opinion and says so. |
 
 `removable`, `bump` and `blocked` are shown by default. `--all` adds the other three.
@@ -102,6 +105,11 @@ imports `nodemon`, so a naive scan calls it dead and tells you to delete the thi
 that runs your dev server. `shed` recognises three kinds:
 
 - **a script runs it** — the package name appears in a `scripts` command
+- **something requires it as a peer** — `next` requires `react-dom`, so `react-dom`
+  sits in your manifest and appears in none of your source
+- **the project shape implies it** — a `tsconfig.json` means `typescript`, a
+  `tailwind.config.js` means `tailwindcss`, a `.eslintrc` means `eslint`. None of
+  them are named anywhere: `next lint` does not contain the string "eslint"
 - **a config names it** — it is named in `tsconfig.json`, `.releaserc`, a CI
   workflow, or a manifest section like `lint-staged` (dependency blocks are
   excluded from that search, or every package would match itself)
@@ -140,7 +148,8 @@ OPTIONS
       --node <version>  Judge against this Node version instead of engines.node
       --ignore <pkg>    Exclude a package (repeatable)
   -a, --all             Also show unreferenced and unmapped packages
-      --[no-]color      Force colour (default: auto, honours NO_COLOR)
+      --[no-]color      Force colour on or off; with neither, NO_COLOR then
+                        FORCE_COLOR then TTY detection decide
   -q, --quiet           Summary line only
   -h, --help
   -v, --version
@@ -182,8 +191,10 @@ variation, and a tool that silently corrupts source is worse than no tool.
 Three guards stand between a finding and an edit:
 
 1. only the `unreferenced` verdict qualifies — never `tooling`
-2. the scan must have parsed **every** file cleanly, because one unparsed file
-   could hide the import that makes a package referenced
+2. the scan must have **accounted for every file**. A parse error, a file skipped
+   for size, or a JSX file all block the edit: an unexamined file is exactly as
+   dangerous as an unparsed one, because the import that would have saved a
+   package could be in it
 3. the rewritten manifest is re-parsed and compared against the intended object
    before anything is written; a mismatch aborts
 
@@ -298,10 +309,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-ed487a133ffa7bfa81a8378e76f23d9717170a5501e14c8f5b48b2139a3190fd  dist/shed.mjs
+e498a784bd50424e5067ad85657f5ddd09710584c936f9d4e53bd07dcd9da3e1  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-ed487a133ffa7bfa81a8378e76f23d9717170a5501e14c8f5b48b2139a3190fd  dist/shed.mjs
+e498a784bd50424e5067ad85657f5ddd09710584c936f9d4e53bd07dcd9da3e1  dist/shed.mjs
 ```
 
 ---
@@ -324,22 +335,33 @@ comment — that package is reported `blocked`. The bias is deliberate: a false
 `\` escaping of a leading `!` or `#` is unimplemented. `node_modules`, `.git`,
 `.hg` and `.svn` are always pruned regardless.
 
-**Files over 2 MB are skipped** as presumed bundles, and counted as skipped.
+**Files over 2 MB are skipped** as presumed bundles. `--fix` refuses to edit a
+project where anything was skipped, since the import that would have vouched for
+a package could be in the file nobody read.
 
-**JSX text is not tokenized.** Imports are still found because they precede the
-JSX, but a stray apostrophe in JSX text (`don't`) is read as an unterminated
-string and reported as a recoverable diagnostic. On a 290-file React project this
-produced 9 such diagnostics; none affected a verdict.
+**JSX text is not tokenized.** An apostrophe or a double quote in JSX text
+(`don't`, `say "hi"`) is read as a string literal. With an odd number on a line
+that produces a recoverable diagnostic; with an even number the "string" closes
+cleanly and anything between is swallowed silently — including a `require()`
+inside a JSX expression. Top-of-file imports are unaffected. Because the failure
+can be silent, **`--fix` refuses to edit any project containing `.jsx` or `.tsx`
+files.** On a 290-file React project the scan produced 9 diagnostics; none
+affected a verdict.
 
-**Tooling detection is name- and text-based.** A package used only by a tool
-`shed` does not know about, named nowhere it looks, is still reported
-`unreferenced`. Check the list before `--fix`.
+**Tooling detection is evidence-based, and evidence can be missing.** A package
+used only by a tool `shed` does not know about, named nowhere it looks and
+required as nobody's peer, is still reported `unreferenced`. Run with `--all`
+and read the list before `--fix` — the default view does not show it.
+
+**`--fix` edits line-wise.** A manifest with a dependency block written on one
+line is left alone with a reason, rather than reformatted.
 
 **Phantom dependencies are not reported.** A package imported but *not* declared
 in the manifest is invisible to `shed` today.
 
 **The semver implementation is a subset.** Comparators, `^`, `~`, wildcards,
-hyphen ranges, intersection and `||` union are supported. Prerelease handling is
+hyphen ranges, intersection and `||` union are supported, with whitespace between
+an operator and its version normalised first (`>= 18.0.0` is `>=18.0.0`). Prerelease handling is
 stricter than node-semver's: a prerelease satisfies a range only when it is at or
 above the range's lower bound. Build metadata is ignored, per spec.
 
@@ -359,7 +381,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 201 tests, node:test only
+make test      # 233 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:

@@ -24,7 +24,6 @@
  * @property {'exact'|'partial'} confidence
  * @property {string} rationale      one line on what the swap actually costs
  * @property {string[]} [caveats]    usage that defeats the swap; probed in source
- * @property {string} [codemod]      id of a mechanical rewrite in src/codemod.mjs
  * @property {string} [docs]         nodejs.org anchor, printed by `shed why`
  */
 
@@ -38,7 +37,6 @@ export const ENTRIES = [
     confidence: 'partial',
     rationale: 'styleText covers named colours and modifiers; the chainable API and level detection are yours to write.',
     caveats: ['.level', '.hex(', '.rgb(', '.bgHex(', '.ansi256(', 'supportsColor'],
-    codemod: 'chalk-call',
     docs: 'util.html#utilstyletextformat-text-options',
   },
   {
@@ -65,7 +63,6 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'exact',
     rationale: 'Identical intent, and the stdlib version also strips non-colour VT sequences.',
-    codemod: 'strip-ansi-call',
   },
   {
     pkg: 'ansi-styles',
@@ -146,7 +143,6 @@ export const ENTRIES = [
     rationale: 'randomUUID is v4 only; v1/v5/v7 and the parse/stringify helpers have no stdlib equivalent.',
     // Anchored to a call or a member access: bare 'parse' would fire on JSON.parse.
     caveats: ['v1(', 'v3(', 'v5(', 'v6(', 'v7(', 'uuidv1', 'uuidv7', 'uuid.parse', 'uuid.stringify', 'uuid.validate'],
-    codemod: 'uuid-v4-call',
   },
   {
     pkg: 'nanoid',
@@ -164,6 +160,7 @@ export const ENTRIES = [
     since: '22.0.0',
     confidence: 'partial',
     rationale: 'fs.glob covers the common patterns; the ignore/cwd/dot option surface is smaller.',
+    caveats: ['nodir', 'absolute', 'dot:', 'ignore:', 'cwd:', 'follow:'],
     docs: 'fs.html#fsglobpattern-options-callback',
   },
   {
@@ -173,6 +170,7 @@ export const ENTRIES = [
     since: '22.0.0',
     confidence: 'partial',
     rationale: 'Same substitution as glob, with a real performance regression on very large trees - measure before you swap.',
+    caveats: ['onlyFiles', 'onlyDirectories', 'absolute', 'ignore:', 'objectMode', 'stats:', 'deep:'],
   },
   {
     pkg: 'rimraf',
@@ -181,7 +179,6 @@ export const ENTRIES = [
     since: '14.14.0',
     confidence: 'exact',
     rationale: 'Core absorbed recursive delete outright; rimraf now mostly wraps it.',
-    codemod: 'rimraf-call',
   },
   {
     pkg: 'mkdirp',
@@ -190,7 +187,6 @@ export const ENTRIES = [
     since: '10.12.0',
     confidence: 'exact',
     rationale: 'One option flag replaced the whole package.',
-    codemod: 'mkdirp-call',
   },
   {
     pkg: 'dotenv',
@@ -248,8 +244,9 @@ export const ENTRIES = [
     weekly: 8_000_000,
     api: 'node:test',
     since: '20.0.0',
-    confidence: 'exact',
-    rationale: 'describe/it map onto test/t.test directly, and the reporter is built in.',
+    confidence: 'partial',
+    rationale: 'describe/it map onto test/t.test directly, but hooks, .only/.skip and the reporter flags are not at parity.',
+    caveats: ['this.timeout(', 'this.retries(', '.only(', 'before(', 'after(', 'beforeEach(', 'afterEach('],
   },
   {
     pkg: 'chai',
@@ -258,6 +255,7 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'Core assertions cover equality and throws; the fluent BDD chain is a style you give up.',
+    caveats: ['expect(', 'should', '.to.', 'chai.use(', 'deep.equal'],
   },
   {
     pkg: 'cross-env',
@@ -315,7 +313,15 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'node:http serves requests; routing, middleware and body parsing are the parts express actually sells.',
-    caveats: ['app.use(', 'express.Router', 'express.static', 'req.body', 'res.render'],
+    // Routing is the thing express is actually for, so any route registration
+    // blocks the swap. Without app.get/post/res.json here, an ordinary Express
+    // app came back "removable" directly above a rationale saying routing is
+    // what express sells.
+    caveats: [
+      'app.use(', 'app.get(', 'app.post(', 'app.put(', 'app.patch(', 'app.delete(',
+      'app.listen(', 'express.Router', 'express.static', 'req.body', 'req.params',
+      'req.query', 'res.json(', 'res.render', 'res.redirect(', 'res.sendFile(',
+    ],
   },
   {
     pkg: 'body-parser',
@@ -473,7 +479,9 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'Intl formats and localises better than any package; date arithmetic and parsing are where you still write code.',
-    caveats: ['.add(', '.subtract(', '.diff(', '.fromNow(', 'customParseFormat'],
+    // .format() with a token string is dayjs's most-used call and Intl cannot
+    // do token formats at all, so omitting it made the common case "removable".
+    caveats: ['.format(', '.add(', '.subtract(', '.diff(', '.fromNow(', '.startOf(', '.endOf(', 'customParseFormat'],
   },
   {
     pkg: 'moment',
@@ -482,7 +490,7 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'Moment is in maintenance mode and says so itself; Intl covers formatting, arithmetic does not come free.',
-    caveats: ['.add(', '.subtract(', '.diff(', '.fromNow(', '.tz('],
+    caveats: ['.format(', '.add(', '.subtract(', '.diff(', '.fromNow(', '.startOf(', '.endOf(', '.tz('],
   },
   {
     pkg: 'crypto-js',

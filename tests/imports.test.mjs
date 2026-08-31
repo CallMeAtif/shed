@@ -207,3 +207,39 @@ test('tokenize is independently correct', async (t) => {
     assert.deepEqual(errs, []);
   });
 });
+
+test('clause scanning is bounded by the grammar, not by a token count', async (t) => {
+  await t.test('an import of eighty aliased names is still found', () => {
+    const clause = Array.from({ length: 80 }, (_, i) => `  Comp${i} as C${i},`).join('\n');
+    const source = `import {\n${clause}\n} from '@mui/material';\n`;
+    assert.deepEqual(specifiers(source), ['@mui/material']);
+  });
+
+  await t.test('a long clause produces no spurious diagnostics', () => {
+    const clause = Array.from({ length: 200 }, (_, i) => `  n${i},`).join('\n');
+    assert.deepEqual(errors(`import {\n${clause}\n} from 'x';\n`), []);
+  });
+});
+
+test('a semicolon-less export must not steal the next statement\'s specifier', async (t) => {
+  await t.test('export { a } followed by an import', () => {
+    assert.deepEqual(specifiers("const a = 1\nexport { a }\nimport semver from 'semver'\n"), ['semver']);
+  });
+
+  await t.test('export { a } followed by a require', () => {
+    assert.deepEqual(specifiers("export { a }\nconst x = require('chalk')\n"), ['chalk']);
+  });
+
+  await t.test('declaration exports are not re-exports', () => {
+    for (const head of ['export default config', 'export const a = 1', 'export function f() {}', 'export class C {}']) {
+      assert.deepEqual(specifiers(`${head}\nimport semver from 'semver'\n`), ['semver'], head);
+    }
+  });
+
+  await t.test('genuine re-export forms still resolve', () => {
+    assert.deepEqual(specifiers("export { red } from 'chalk';"), ['chalk']);
+    assert.deepEqual(specifiers("export * from 'chalk';"), ['chalk']);
+    assert.deepEqual(specifiers("export * as ns from 'chalk';"), ['chalk']);
+    assert.deepEqual(specifiers("export type { A } from 'chalk';"), ['chalk']);
+  });
+});

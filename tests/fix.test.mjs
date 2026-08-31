@@ -57,7 +57,7 @@ test('removeDependencies preserves the file around the edit', async (t) => {
     const { removed, skipped } = removeDependencies(MANIFEST, [{ name: 'nope', field: 'dependencies' }]);
     assert.deepEqual(removed, []);
     assert.equal(skipped.length, 1);
-    assert.match(skipped[0].reason, /could not locate/);
+    assert.match(skipped[0].reason, /no line of its own/);
   });
 
   await t.test('removes several at once', () => {
@@ -184,6 +184,46 @@ test('--fix end to end', async (t) => {
     const { stdout } = run([dir, '--fix']);
     assert.equal(readFileSync(join(dir, 'package.json'), 'utf8'), first);
     assert.match(stdout, /Nothing to remove/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+test('--fix refuses when the scan could not account for every file', async (t) => {
+  const project = (manifest, files) => {
+    const dir = mkdtempSync(join(tmpdir(), 'shed-blk-'));
+    writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), content);
+    }
+    return dir;
+  };
+  const run = (argv) => {
+    const out = [];
+    const err = [];
+    const code = main([...argv, '--no-color'], {
+      stdout: (s) => out.push(s), stderr: (s) => err.push(s), columns: 200,
+    });
+    return { code, stdout: out.join('\n'), stderr: err.join('\n') };
+  };
+  const manifest = { name: 'f', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0' } };
+
+  await t.test('a file skipped for size blocks the edit', () => {
+    const dir = project(manifest, { 'src/a.js': 'export default 1;\n' });
+    writeFileSync(join(dir, 'src/big.js'), `${'// pad\n'.repeat(400000)}import chalk from 'chalk';\n`);
+    const { code, stderr } = run([dir, '--fix']);
+    assert.equal(code, 2);
+    assert.match(stderr, /skipped and never read/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).dependencies.chalk, '^5.0.0');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a JSX file blocks the edit, because JSX text is not tokenised', () => {
+    const dir = project(manifest, { 'src/a.jsx': "const A = () => <p>it's {require('chalk')} fine</p>;\n" });
+    const { code, stderr } = run([dir, '--fix']);
+    assert.equal(code, 2);
+    assert.match(stderr, /JSX/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).dependencies.chalk, '^5.0.0');
     rmSync(dir, { recursive: true, force: true });
   });
 });

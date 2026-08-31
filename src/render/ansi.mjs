@@ -8,10 +8,12 @@
 import { styleText, stripVTControlCharacters } from 'node:util';
 
 /**
- * Resolve whether colour should be emitted for a stream.
+ * Resolve whether colour should be emitted for a stream, in the absence of an
+ * explicit --color/--no-color. A flag the user typed just now is more specific
+ * than the environment, so main.mjs consults this only when neither is given.
  *
  * Precedence follows the informal cross-ecosystem contract:
- *   NO_COLOR (any value, even empty) always wins - https://no-color.org
+ *   NO_COLOR (any value, even empty) wins - https://no-color.org
  *   FORCE_COLOR=0 disables, any other value enables
  *   otherwise: colour only on a TTY that is not TERM=dumb
  *
@@ -37,7 +39,12 @@ export function createPainter(enabled) {
    * @param {string|string[]} format a `util.styleText` format name or list
    * @param {string} text
    */
-  const paint = (format, text) => (enabled ? styleText(format, text) : text);
+  // styleText validates the target stream by default and silently returns plain
+  // text when stdout is not a TTY - which made `--color` a no-op through a pipe
+  // while the undocumented FORCE_COLOR still worked. Colour policy is decided by
+  // colorEnabled() above, so the built-in check is turned off here rather than
+  // second-guessing it.
+  const paint = (format, text) => (enabled ? styleText(format, text, { validateStream: false }) : text);
 
   return {
     enabled,

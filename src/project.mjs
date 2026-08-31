@@ -239,6 +239,25 @@ export function loadConfigText(dir, pkg) {
   }
 
   const parts = [JSON.stringify(manifest)];
+
+  // Framework configs name their plugins as bare strings or object keys rather
+  // than importing them - postcss.config.js lists `autoprefixer` as a key, and
+  // tailwind/next/vite configs do the same. Matching by shape rather than by a
+  // fixed list keeps this working for the next framework too.
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/(\.config\.[cm]?[jt]s$|\.config\.(json|ya?ml)$|^\.[a-z]+rc)/i.test(entry.name)) continue;
+      try {
+        parts.push(readFileSync(join(dir, entry.name), 'utf8'));
+      } catch {
+        // unreadable config contributes nothing
+      }
+    }
+  } catch {
+    // unreadable project root; the manifest text alone still counts
+  }
+
   for (const name of CONFIG_FILES) {
     const path = join(dir, name);
     if (existsSync(path)) {
@@ -263,4 +282,61 @@ export function loadConfigText(dir, pkg) {
     }
   }
   return parts.join('\n');
+}
+
+/**
+ * Packages implied by the shape of the project rather than named anywhere.
+ *
+ * Two conventions do most of the work. A `<name>.config.*` file at the root
+ * implies `<name>` (tailwind, postcss, vite, jest, next), and a `.<name>rc` file
+ * implies `<name>` (eslint, prettier, stylelint). Neither package is imported,
+ * and neither is named in a script - `next lint` does not contain the string
+ * "eslint" - so without this they look dead and `--fix` deletes the toolchain.
+ *
+ * @param {string} dir
+ * @param {string[]} files repository-relative source paths already collected
+ * @returns {Set<string>}
+ */
+export function impliedTooling(dir, files) {
+  /** @type {Set<string>} */
+  const implied = new Set();
+
+  /** Config basenames that do not match the package they belong to. */
+  const ALIASES = new Map([
+    ['tailwind', 'tailwindcss'],
+    ['babel', '@babel/core'],
+    ['commitlint', '@commitlint/cli'],
+    ['release', 'semantic-release'],
+  ]);
+
+  /** @param {string} token */
+  const add = (token) => {
+    implied.add(token);
+    const alias = ALIASES.get(token);
+    if (alias) implied.add(alias);
+  };
+
+  /** @type {string[]} */
+  let entries = [];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
+  } catch {
+    return implied;
+  }
+
+  for (const name of entries) {
+    const config = /^(.+)\.config\.[cm]?[jt]s$|^(.+)\.config\.(?:json|ya?ml)$/.exec(name);
+    if (config) add(config[1] ?? config[2]);
+
+    const rc = /^\.([a-z][a-z0-9-]*)rc(?:\.[a-z]+)?$/i.exec(name);
+    if (rc) add(rc[1].toLowerCase());
+  }
+
+  // TypeScript is required by anything that compiles TypeScript, and is named by
+  // none of it.
+  const typed = entries.includes('tsconfig.json') || entries.includes('jsconfig.json')
+    || files.some((file) => /\.[cm]?tsx?$/.test(file));
+  if (typed) implied.add('typescript');
+
+  return implied;
 }
