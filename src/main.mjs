@@ -12,7 +12,7 @@ import { parse, helpText } from './cli.mjs';
 import { colorEnabled, createPainter } from './render/ansi.mjs';
 import { analyze, humanCount, VERDICT_ORDER } from './analyze.mjs';
 import { renderText, toJSON } from './report.mjs';
-import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile } from './project.mjs';
+import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 import { planFix, removeDependencies } from './fix.mjs';
@@ -100,7 +100,7 @@ function runScan(positionals, painter, io, flags) {
   const walk = walkSource(dir, loadIgnore(dir, Ignore));
   const floor = resolveNodeFloor(pkg, flags.node);
 
-  const analysis = analyze({ dir, pkg, files: walk.files, floor, ignore });
+  const analysis = analyze({ dir, pkg, files: walk.files, floor, ignore, configText: loadConfigText(dir, pkg) });
   const report = {
     version: VERSION,
     project: { dir, name: pkg.name ?? null, version: pkg.version ?? null },
@@ -223,7 +223,7 @@ function runWhy(positionals, painter, io, flags) {
     const { pkg } = loadManifest(dir);
     const walk = walkSource(dir, loadIgnore(dir, Ignore));
     const floor = resolveNodeFloor(pkg, flags.node);
-    const { findings } = analyze({ dir, pkg, files: walk.files, floor });
+    const { findings } = analyze({ dir, pkg, files: walk.files, floor, configText: loadConfigText(dir, pkg) });
     const finding = findings.find((f) => f.name === name);
     lines.push('');
     if (!finding) {

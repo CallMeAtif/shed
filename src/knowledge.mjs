@@ -100,7 +100,8 @@ export const ENTRIES = [
     since: '18.3.0',
     confidence: 'partial',
     rationale: 'parseArgs is string-and-boolean only by design; subcommands, negation and coercion are ~80 lines you write.',
-    caveats: ['--'],
+    // Distinctive spellings only: a bare '--' would match any comment.
+    caveats: ["'--':", "['--']", '"--":'],
     docs: 'util.html#utilparseargsconfig',
   },
   {
@@ -143,7 +144,8 @@ export const ENTRIES = [
     since: '14.17.0',
     confidence: 'partial',
     rationale: 'randomUUID is v4 only; v1/v5/v7 and the parse/stringify helpers have no stdlib equivalent.',
-    caveats: ['v1', 'v3', 'v5', 'v6', 'v7', 'parse', 'stringify', 'validate'],
+    // Anchored to a call or a member access: bare 'parse' would fire on JSON.parse.
+    caveats: ['v1(', 'v3(', 'v5(', 'v6(', 'v7(', 'uuidv1', 'uuidv7', 'uuid.parse', 'uuid.stringify', 'uuid.validate'],
     codemod: 'uuid-v4-call',
   },
   {
@@ -331,7 +333,7 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'A permissive CORS policy is four setHeader calls; per-origin allow-lists and preflight caching are yours.',
-    caveats: ['credentials', 'preflightContinue', 'optionsSuccessStatus'],
+    caveats: ['credentials:', 'preflightContinue', 'optionsSuccessStatus'],
   },
   {
     pkg: 'helmet',
@@ -349,7 +351,7 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'Parsing is a split and a decodeURIComponent; signed cookies need an HMAC you write over node:crypto.',
-    caveats: ['signedCookies', 'secret'],
+    caveats: ['signedCookies'],
   },
   {
     pkg: 'jsonwebtoken',
@@ -358,7 +360,7 @@ export const ENTRIES = [
     since: '15.7.0',
     confidence: 'partial',
     rationale: 'HS256 sign and verify is about thirty lines over node:crypto, with timingSafeEqual for the comparison.',
-    caveats: ['jwksClient', 'JwksClient', 'getKey'],
+    caveats: ['jwksClient', 'JwksClient', 'jwks-rsa'],
   },
   {
     pkg: 'bcrypt',
@@ -385,7 +387,7 @@ export const ENTRIES = [
     since: '10.0.0',
     confidence: 'partial',
     rationale: 'URLSearchParams covers flat query strings; qs exists for the nested bracket syntax it does not parse.',
-    caveats: ['allowDots', 'arrayFormat', 'depth', '[]='],
+    caveats: ['allowDots', 'arrayFormat', 'depth:', '[]='],
   },
   {
     pkg: 'query-string',

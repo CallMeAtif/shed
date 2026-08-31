@@ -4,7 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { main } from '../src/main.mjs';
@@ -262,5 +262,93 @@ test('other commands', async (t) => {
 
   await t.test('why with no package name is a usage error', () => {
     assert.equal(run(['why']).code, 2);
+  });
+});
+
+test('packages that are never imported but must not be removed', async (t) => {
+  await t.test('a @types package is tooling, not dead weight', () => {
+    const dir = makeProject(
+      {
+        name: 'fixture',
+        engines: { node: '>=22.0.0' },
+        devDependencies: { '@types/node': '^22.0.0' },
+      },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    const finding = report(dir, ['--all']).json.findings.find((f) => f.name === '@types/node');
+    assert.equal(finding.verdict, 'tooling');
+    assert.match(finding.because, /resolved by name/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('an eslint plugin is tooling by naming convention', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, devDependencies: { 'eslint-plugin-import': '^2.0.0' } },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    assert.equal(
+      report(dir, ['--all']).json.findings.find((f) => f.name === 'eslint-plugin-import').verdict,
+      'tooling',
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a package named in a JSON config is tooling', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, devDependencies: { 'some-tool': '^1.0.0' } },
+      { 'src/a.js': 'export default 1;\n', '.releaserc.json': '{ "plugins": ["some-tool"] }\n' },
+    );
+    const finding = report(dir, ['--all']).json.findings.find((f) => f.name === 'some-tool');
+    assert.equal(finding.verdict, 'tooling');
+    assert.match(finding.because, /named in a config file/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a package named in a manifest section other than dependencies is tooling', () => {
+    const dir = makeProject(
+      {
+        name: 'fixture',
+        engines: { node: '>=22.0.0' },
+        'lint-staged': { '*.js': 'some-linter --fix' },
+        devDependencies: { 'some-linter': '^1.0.0' },
+      },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    assert.equal(
+      report(dir, ['--all']).json.findings.find((f) => f.name === 'some-linter').verdict,
+      'tooling',
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('none of them are offered to --fix', () => {
+    const dir = makeProject(
+      {
+        name: 'fixture',
+        engines: { node: '>=22.0.0' },
+        devDependencies: { '@types/node': '^22.0.0', 'eslint-config-x': '^1.0.0' },
+        dependencies: { uuid: '^9.0.0' },
+      },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    const { stdout } = run([dir, '--fix']);
+    const after = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    assert.match(stdout, /Removed 1 unreferenced dependency/);
+    assert.equal(after.dependencies.uuid, undefined);
+    assert.equal(after.devDependencies['@types/node'], '^22.0.0');
+    assert.equal(after.devDependencies['eslint-config-x'], '^1.0.0');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a genuinely unused package is still caught', () => {
+    const dir = makeProject(
+      { name: 'fixture', engines: { node: '>=22.0.0' }, dependencies: { uuid: '^9.0.0' } },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    assert.equal(
+      report(dir, ['--all']).json.findings.find((f) => f.name === 'uuid').verdict,
+      'unreferenced',
+    );
+    rmSync(dir, { recursive: true, force: true });
   });
 });

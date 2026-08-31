@@ -86,6 +86,39 @@ function scriptsUsing(pkg, name) {
 }
 
 /**
+ * Packages whose name alone says they are never imported.
+ *
+ * A type package is resolved by the TypeScript compiler, and an eslint config or
+ * a babel preset is named as a bare string inside a config that may not even be
+ * JavaScript. Nothing imports any of them, so an import-based scan calls them
+ * dead - and deleting @types/node is a bad afternoon.
+ */
+const TOOLING_BY_NAME = [
+  /^@types\//,
+  /^eslint-(config|plugin)-/,
+  /^@[^/]+\/eslint-(config|plugin)/,
+  /^babel-(plugin|preset)-/,
+  /^@babel\/(plugin|preset)-/,
+  /^stylelint-config-/,
+  /^prettier-plugin-/,
+  /^@commitlint\/config/,
+  /^semantic-release-/,
+];
+
+/**
+ * Whether a package is named somewhere that is not an import.
+ *
+ * @param {string} configText
+ * @param {string} name
+ * @returns {boolean}
+ */
+function namedInConfig(configText, name) {
+  if (!configText) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|["'\\s:/=])${escaped}(["'\\s,:/]|$)`).test(configText);
+}
+
+/**
  * @typedef {object} Finding
  * @property {string} name
  * @property {string} range        the version range the manifest declares
@@ -107,9 +140,10 @@ function scriptsUsing(pkg, name) {
  * @param {string[]} options.files repository-relative source paths
  * @param {{ version: string, source: string }} options.floor
  * @param {Set<string>} [options.ignore] package names to leave out entirely
+ * @param {string} [options.configText] text where a package may be named without being imported
  * @returns {{ findings: Finding[], errors: import('./errors.mjs').Diagnostic[], scanned: number, totals: object }}
  */
-export function analyze({ dir, pkg, files, floor, ignore = new Set() }) {
+export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText = '' }) {
   const declared = declaredDependencies(pkg);
 
   /** @type {Map<string, Site[]>} */
@@ -166,14 +200,22 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set() }) {
     const hits = caveatHits.get(name) ?? [];
 
     const scripts = scriptsUsing(pkg, name);
+    const byName = TOOLING_BY_NAME.some((pattern) => pattern.test(name));
+    const inConfig = namedInConfig(configText, name);
 
     /** @type {Verdict} */
     let verdict;
     let because;
 
-    if (found.length === 0 && scripts.length > 0) {
+    if (found.length === 0 && (scripts.length > 0 || byName || inConfig)) {
       verdict = 'tooling';
-      because = `nothing imports it, but ${scripts.map((s) => `scripts.${s}`).join(' and ')} runs it`;
+      if (scripts.length > 0) {
+        because = `nothing imports it, but ${scripts.map((s) => `scripts.${s}`).join(' and ')} runs it`;
+      } else if (byName) {
+        because = 'nothing imports it, and nothing should - this kind of package is resolved by name';
+      } else {
+        because = 'nothing imports it, but it is named in a config file';
+      }
     } else if (found.length === 0) {
       verdict = 'unreferenced';
       because = entry

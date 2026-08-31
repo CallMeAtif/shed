@@ -202,3 +202,65 @@ export function loadLockfile(dir, parse) {
     return { lock: null, reason: /** @type {Error} */ (err).message };
   }
 }
+
+/**
+ * Config files that reference a dependency by name without importing it.
+ *
+ * Only non-source formats are listed: a `.eslintrc.cjs` or `vite.config.ts` is
+ * already walked as source, so its imports are found the normal way. These are
+ * the ones where a package name appears as a bare string in JSON or YAML.
+ */
+const CONFIG_FILES = [
+  '.eslintrc', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
+  '.prettierrc', '.prettierrc.json', '.prettierrc.yml', '.prettierrc.yaml',
+  '.stylelintrc', '.stylelintrc.json', '.babelrc', '.babelrc.json',
+  'babel.config.json', 'tsconfig.json', 'jsconfig.json', '.npmrc', '.nvmrc',
+  'Dockerfile', 'docker-compose.yml', 'docker-compose.yaml',
+  'lerna.json', 'turbo.json', 'nx.json', 'renovate.json', '.releaserc',
+  '.releaserc.json', 'commitlint.config.json', '.lintstagedrc',
+  '.lintstagedrc.json', '.markdownlint.json', 'netlify.toml', 'vercel.json',
+];
+
+/**
+ * Text in which a dependency may be named without being imported.
+ *
+ * Includes the manifest itself with the dependency blocks stripped, so that
+ * `eslintConfig`, `lint-staged`, `husky` and `browserslist` sections count, and
+ * the CI workflows, where a tool is usually invoked by name.
+ *
+ * @param {string} dir
+ * @param {object} pkg
+ * @returns {string}
+ */
+export function loadConfigText(dir, pkg) {
+  const manifest = { ...pkg };
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    delete manifest[field];
+  }
+
+  const parts = [JSON.stringify(manifest)];
+  for (const name of CONFIG_FILES) {
+    const path = join(dir, name);
+    if (existsSync(path)) {
+      try {
+        parts.push(readFileSync(path, 'utf8'));
+      } catch {
+        // An unreadable config file simply contributes nothing.
+      }
+    }
+  }
+
+  const workflows = join(dir, '.github', 'workflows');
+  if (existsSync(workflows)) {
+    try {
+      for (const entry of readdirSync(workflows, { withFileTypes: true })) {
+        if (entry.isFile() && /\.ya?ml$/.test(entry.name)) {
+          parts.push(readFileSync(join(workflows, entry.name), 'utf8'));
+        }
+      }
+    } catch {
+      // ditto
+    }
+  }
+  return parts.join('\n');
+}

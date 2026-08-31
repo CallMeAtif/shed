@@ -92,14 +92,23 @@ different reasons a dependency might not be deletable.
 | **bump** | The replacement exists, but above the floor the project declares in `engines.node`. Reports the version needed. |
 | **blocked** | The code uses API surface the stdlib replacement does not cover. Cites the line. |
 | **unreferenced** | Declared in the manifest, but nothing imports it anywhere `shed` looked. |
-| **tooling** | Never imported, but a package script invokes it by name — `nodemon`, `typescript`, `eslint`. |
+| **tooling** | Never imported, and never should be — a script runs it, a config names it, or its name says so (`@types/*`, `eslint-plugin-*`). |
 | **unknown** | Not in the knowledge base. `shed` has no opinion and says so. |
 
 `removable`, `bump` and `blocked` are shown by default. `--all` adds the other three.
 
 `tooling` exists because it is this genre of tool's classic false positive. Nothing
 imports `nodemon`, so a naive scan calls it dead and tells you to delete the thing
-that runs your dev server. `shed` reads `scripts` and reclassifies.
+that runs your dev server. `shed` recognises three kinds:
+
+- **a script runs it** — the package name appears in a `scripts` command
+- **a config names it** — it is named in `tsconfig.json`, `.releaserc`, a CI
+  workflow, or a manifest section like `lint-staged` (dependency blocks are
+  excluded from that search, or every package would match itself)
+- **its name says so** — `@types/*`, `eslint-plugin-*`, `babel-preset-*` and
+  friends are resolved by name and never imported by anyone
+
+`--fix` will not touch any of them.
 
 The bar for `removable` is deliberately high. A false "you can delete this" costs
 more trust than ten correct ones earn, so every heuristic here is biased toward
@@ -289,10 +298,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-6244a0752b3094a060b8fd217c21c428ab58496f5aff94cf9756150145d26466  dist/shed.mjs
+ed487a133ffa7bfa81a8378e76f23d9717170a5501e14c8f5b48b2139a3190fd  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-6244a0752b3094a060b8fd217c21c428ab58496f5aff94cf9756150145d26466  dist/shed.mjs
+ed487a133ffa7bfa81a8378e76f23d9717170a5501e14c8f5b48b2139a3190fd  dist/shed.mjs
 ```
 
 ---
@@ -322,6 +331,10 @@ JSX, but a stray apostrophe in JSX text (`don't`) is read as an unterminated
 string and reported as a recoverable diagnostic. On a 290-file React project this
 produced 9 such diagnostics; none affected a verdict.
 
+**Tooling detection is name- and text-based.** A package used only by a tool
+`shed` does not know about, named nowhere it looks, is still reported
+`unreferenced`. Check the list before `--fix`.
+
 **Phantom dependencies are not reported.** A package imported but *not* declared
 in the manifest is invisible to `shed` today.
 
@@ -346,7 +359,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 194 tests, node:test only
+make test      # 201 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:
