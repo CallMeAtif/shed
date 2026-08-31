@@ -181,3 +181,24 @@ export function loadIgnore(dir, Ignore, extra = []) {
   const content = existsSync(path) ? readFileSync(path, 'utf8') : '';
   return Ignore.parse(content, ['node_modules/', '.git/', ...extra]);
 }
+
+/**
+ * Read the project's package-lock.json, if it has one.
+ *
+ * Absence is normal, not an error: a project may use another package manager, or
+ * may simply not have installed yet. shed degrades to reporting download reach
+ * without transitive counts, and says which it is doing.
+ *
+ * @param {string} dir
+ * @param {(text: string) => { lock: object|null, reason: string|null }} parse
+ * @returns {{ lock: object|null, reason: string|null }}
+ */
+export function loadLockfile(dir, parse) {
+  const path = join(dir, 'package-lock.json');
+  if (!existsSync(path)) return { lock: null, reason: null };
+  try {
+    return parse(readFileSync(path, 'utf8'));
+  } catch (err) {
+    return { lock: null, reason: /** @type {Error} */ (err).message };
+  }
+}

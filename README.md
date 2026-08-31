@@ -72,6 +72,8 @@ UNREFERENCED (3) - declared, but nothing imports it
   nodemailer
 
 4 dependencies the standard library already replaces, worth ~35M weekly downloads.
+Removing them takes 23 packages out of node_modules, 1 of which runs an install
+script (bcrypt).
 ```
 
 That run found something the author did not know: the project has **both**
@@ -134,6 +136,30 @@ OPTIONS
   -h, --help
   -v, --version
 ```
+
+### What it actually costs you
+
+A download count describes a package's reach in the ecosystem. It says nothing
+about what the package costs *your* project. So when a `package-lock.json` is
+present, `shed` reads it, builds the resolution graph, and computes the
+transitive closure that becomes unreachable if the removable packages go:
+
+```
+Removing them takes 23 packages out of node_modules, 1 of which runs an
+install script (bcrypt).
+```
+
+The arithmetic is deliberately conservative. A transitive package that some
+*surviving* dependency still needs is not counted — that is the difference
+between "cors depends on 2 packages" and "removing cors removes 2 packages",
+and only the second is true. Resolution walks outward from each importer the
+way Node does, so a nested copy beats the hoisted one.
+
+Install scripts are called out separately because they are the part of a
+dependency that runs code on your machine at install time.
+
+Lockfile v2 and v3 only (npm 7+). v1 is detected and reported as unsupported
+rather than half-parsed. No lockfile means the numbers are simply omitted.
 
 ### `--fix`
 
@@ -263,10 +289,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-316b0a9c286b1313a5469ff55b9bdf2dc92e9df0315e25ae167435f39046fe47  dist/shed.mjs
+6244a0752b3094a060b8fd217c21c428ab58496f5aff94cf9756150145d26466  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-316b0a9c286b1313a5469ff55b9bdf2dc92e9df0315e25ae167435f39046fe47  dist/shed.mjs
+6244a0752b3094a060b8fd217c21c428ab58496f5aff94cf9756150145d26466  dist/shed.mjs
 ```
 
 ---
@@ -307,8 +333,9 @@ above the range's lower bound. Build metadata is ignored, per spec.
 **`--fix` only edits `package.json`.** It never rewrites source and never touches
 the lockfile. After a fix, run your package manager to prune the lock.
 
-**No `package-lock.json` reading yet.** The impact numbers `shed` reports are
-weekly-download reach, not transitive package counts or install size on disk.
+**Install size on disk is not reported.** `shed` counts the packages that would
+leave `node_modules`, not the bytes: a lockfile records no sizes, and reading them
+would mean walking an installed tree.
 
 **Performance is unmeasured.** No benchmark was run against `depcheck` or
 `knip`. The scan of a 555-file repository completes in well under a second on an
@@ -319,7 +346,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 177 tests, node:test only
+make test      # 194 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:
@@ -338,6 +365,7 @@ src/gitignore.mjs     .gitignore matching
 src/knowledge.mjs     the 62-entry mapping table — data, not code
 src/analyze.mjs       the verdict engine
 src/fix.mjs           the only edit shed will make, and its three guards
+src/lockfile/npm.mjs  the resolution graph, and what removal actually frees
 src/report.mjs        text and JSON renderers
 src/render/           colour, display width, wrapping
 tools/bundle.mjs      the deterministic build

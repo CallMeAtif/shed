@@ -97,10 +97,23 @@ function renderSummary(report, c) {
       : c.boldGreen('Nothing removable. This project is already leaning on the standard library.');
   }
   const noun = byVerdict.removable === 1 ? 'dependency' : 'dependencies';
-  return c.boldGreen(
+  const headline = c.boldGreen(
     `${byVerdict.removable} ${noun} the standard library already replaces` +
     (weeklyRemovable > 0 ? `, worth ~${humanCount(weeklyRemovable)} weekly downloads.` : '.'),
   );
+  return report.impact?.packages > 0 ? `${headline}\n${renderImpact(report.impact, c)}` : headline;
+}
+
+/**
+ * The lockfile-derived cost of the packages that could go.
+ * @param {{ packages: number, installScripts: number, names: string[] }} impact
+ */
+function renderImpact(impact, c) {
+  const noun = impact.packages === 1 ? 'package' : 'packages';
+  const scripts = impact.installScripts > 0
+    ? `, ${impact.installScripts} of which ${impact.installScripts === 1 ? 'runs' : 'run'} an install script (${impact.names.join(', ')})`
+    : '';
+  return c.dim(`Removing them takes ${impact.packages} ${noun} out of node_modules${scripts}.`);
 }
 
 /**
@@ -118,6 +131,7 @@ export function toJSON(report) {
     node: report.node,
     scanned: report.scanned,
     totals: report.totals,
+    impact: report.impact,
     findings: report.findings.map((f) => ({
       name: f.name,
       range: f.range,

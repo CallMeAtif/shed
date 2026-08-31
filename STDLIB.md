@@ -146,6 +146,19 @@ Worth listing as a negative result: several packages I reached for by reflex
 turned out to have no job in this codebase once the design settled. The most
 effective dependency removal is still not adding one.
 
+### 14. `@npmcli/arborist` / `npm-check` → `JSON.parse` and a graph walk, `src/lockfile/npm.mjs`
+
+The lockfile is JSON, so parsing it is free. The part that is not free is the
+question worth asking: *what actually leaves `node_modules` if this dependency
+goes?* That is a reachability computation — everything reachable from the
+packages being removed, minus everything still reachable from the ones being
+kept — over a graph where resolution walks outward from each importer the way
+Node itself does, because npm hoists and a nested copy beats the hoisted one.
+
+About eighty lines, no dependency, and it turns "you could delete cors" into
+"deleting these takes 23 packages and one install script out of your supply
+chain", which is the sentence the whole tool exists to be able to say.
+
 ---
 
 ## Package Killer

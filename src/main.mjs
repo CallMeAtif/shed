@@ -12,10 +12,11 @@ import { parse, helpText } from './cli.mjs';
 import { colorEnabled, createPainter } from './render/ansi.mjs';
 import { analyze, humanCount, VERDICT_ORDER } from './analyze.mjs';
 import { renderText, toJSON } from './report.mjs';
-import { loadManifest, resolveNodeFloor, walkSource, loadIgnore } from './project.mjs';
+import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 import { planFix, removeDependencies } from './fix.mjs';
+import { parseNpmLock, removalImpact } from './lockfile/npm.mjs';
 
 /**
  * Replaced with a literal by tools/bundle.mjs, so the built artifact carries its
@@ -105,6 +106,7 @@ function runScan(positionals, painter, io, flags) {
     project: { dir, name: pkg.name ?? null, version: pkg.version ?? null },
     node: floor,
     ...analysis,
+    impact: measureImpact(dir, analysis.findings),
   };
 
   if (flags.fix) return applyFix(report, manifestPath, painter, io);
@@ -121,6 +123,35 @@ function runScan(positionals, painter, io, flags) {
   }
 
   return analysis.totals.byVerdict.removable > 0 ? 1 : 0;
+}
+
+/**
+ * What would actually leave node_modules, according to the lockfile.
+ *
+ * Download counts describe a package's reach in the ecosystem; this describes
+ * its cost in this project. Only packages that are candidates for deletion -
+ * removable and unreferenced - are counted, and only the ones no surviving
+ * dependency still needs.
+ *
+ * @param {string} dir
+ * @param {import('./analyze.mjs').Finding[]} findings
+ * @returns {{ packages: number, installScripts: number, names: string[] }|null}
+ */
+function measureImpact(dir, findings) {
+  const { lock } = loadLockfile(dir, parseNpmLock);
+  if (!lock) return null;
+
+  const candidates = findings
+    .filter((f) => f.verdict === 'removable' || f.verdict === 'unreferenced')
+    .map((f) => f.name);
+  if (candidates.length === 0) return { packages: 0, installScripts: 0, names: [] };
+
+  const { packages, installScripts } = removalImpact(lock, candidates);
+  return {
+    packages: packages.length,
+    installScripts: installScripts.length,
+    names: installScripts.map((node) => node.name),
+  };
 }
 
 /**
