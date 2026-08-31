@@ -12,8 +12,12 @@ build:
 test:
 	@$(NODE) --test
 
-## check: build, test, and prove the dependency manifest is empty
-check: build test deps-proof
+## check: build, test, prove zero deps, and verify the docs are intact
+check: build test docs deps-proof
+
+## docs: fail if a shipped document is empty or gutted
+docs:
+	@$(NODE) tools/check-docs.mjs
 
 ## deps-proof: regenerate the zero-dependency evidence file
 deps-proof:
