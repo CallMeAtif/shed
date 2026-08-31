@@ -604,8 +604,9 @@ export const ENTRIES = [
     weekly: 15_000_000,
     api: 'util.isDeepStrictEqual()',
     since: '9.0.0',
-    confidence: 'exact',
-    rationale: 'Core has structural equality, and it handles cycles and typed arrays correctly.',
+    confidence: 'partial',
+    rationale: "Core handles cycles and typed arrays correctly, but compares strictly; deep-equal's default is loose (==), so a swap changes results unless you already pass { strict: true }.",
+    caveats: ['strict: false', 'deepEqual('],
   },
   {
     pkg: 'fast-deep-equal',

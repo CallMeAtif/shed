@@ -548,3 +548,66 @@ test('JSX text is not treated as code when probing caveats', async (t) => {
     assert.equal(report(dir).json.findings.find((f) => f.name === 'chalk').verdict, 'removable');
   });
 });
+
+test('a browser bundle is not offered Node-only replacements', async (t) => {
+  const dir = makeProject(
+    {
+      name: 'app',
+      engines: { node: '>=22.0.0' },
+      browserslist: ['ie 11'],
+      dependencies: { 'path-browserify': '^1.0.0', 'safe-buffer': '^5.2.0', uuid: '^9.0.0' },
+    },
+    {
+      'src/a.js': "import path from 'path-browserify';\nimport { Buffer } from 'safe-buffer';\nimport { v4 } from 'uuid';\nexport default [path, Buffer, v4];\n",
+    },
+  );
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { json } = report(dir);
+  const verdict = (name) => json.findings.find((f) => f.name === name).verdict;
+
+  await t.test('a node: builtin replacement is blocked, not recommended', () => {
+    assert.equal(verdict('path-browserify'), 'blocked');
+    assert.match(json.findings.find((f) => f.name === 'path-browserify').because, /builds for browsers/);
+  });
+
+  await t.test('so is a Buffer replacement', () => {
+    assert.equal(verdict('safe-buffer'), 'blocked');
+  });
+
+  await t.test('but an API browsers do have is still offered', () => {
+    // crypto.randomUUID exists in a browser secure context; the header warns.
+    assert.equal(verdict('uuid'), 'removable');
+  });
+
+  await t.test('and on a Node project the same entries are removable again', () => {
+    const node = makeProject(
+      { name: 'svc', engines: { node: '>=22.0.0' }, dependencies: { 'path-browserify': '^1.0.0' } },
+      { 'src/a.js': "import path from 'path-browserify';\nexport default path;\n" },
+    );
+    assert.equal(report(node).json.findings.find((f) => f.name === 'path-browserify').verdict, 'removable');
+    rmSync(node, { recursive: true, force: true });
+  });
+});
+
+test('the string-literal veto only fires on specifier-shaped names', async (t) => {
+  const dir = makeProject(
+    {
+      name: 't',
+      engines: { node: '>=22.0.0' },
+      dependencies: { debug: '^4.0.0', got: '^14.0.0', 'pino-pretty': '^11.0.0' },
+    },
+    { 'src/a.js': "const level = 'debug';\nconst verb = 'got';\nexport const t = { target: 'pino-pretty' };\n" },
+  );
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { json } = report(dir, ['--all']);
+
+  await t.test('an ordinary word does not shield a dead dependency', () => {
+    for (const name of ['debug', 'got']) {
+      assert.equal(json.findings.find((f) => f.name === name).unconfirmed, false, name);
+    }
+  });
+
+  await t.test('but a hyphenated name loaded at runtime still does', () => {
+    assert.equal(json.findings.find((f) => f.name === 'pino-pretty').unconfirmed, true);
+  });
+});

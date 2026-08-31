@@ -121,7 +121,7 @@ works".
 
 ### 7. `mocha` / `jest` / `vitest` → `node:test` + `node:assert/strict`
 
-265 tests, no runner installed. Nested `t.test()` subtests give the same
+273 tests, no runner installed. Nested `t.test()` subtests give the same
 structure `describe`/`it` would. The one thing genuinely missing versus Jest is
 module mocking, which this codebase does not need — every module takes its
 dependencies as parameters, and `main()` takes its IO as an argument specifically

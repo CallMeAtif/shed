@@ -340,10 +340,10 @@ produce the same bytes.
 
 ```
 $ make build && sha256sum dist/shed.mjs
-852445cfc8843ce8c1e04c1cfd0736814861f9dbdc0becefbf6674bca2233e20  dist/shed.mjs
+1b61c27fba96ef044bc9638d4e77da67b8b644b264d60c5e506f72bfe3dd5307  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-852445cfc8843ce8c1e04c1cfd0736814861f9dbdc0becefbf6674bca2233e20  dist/shed.mjs
+1b61c27fba96ef044bc9638d4e77da67b8b644b264d60c5e506f72bfe3dd5307  dist/shed.mjs
 ```
 
 ---
@@ -387,7 +387,11 @@ Rather than refusing to touch JSX projects at all, `shed` runs a second,
 deliberately permissive scan that ignores string and comment context. It is never
 used to claim a package **is** used — only to refuse to claim it is not. If the
 loose scan sees a name the strict one did not, that package is reported as too
-close to call and `--fix` will not touch it. On a 290-file React project the
+close to call and `--fix` will not touch it. The same veto covers a package
+named as a string literal rather than imported — `pino({ transport: { target:
+'pino-pretty' } })` — but only for specifier-shaped names containing a hyphen,
+slash or dot. A package called `debug` or `got` collides with ordinary string
+values, and shielding it forever would cost usefulness for no safety. On a 290-file React project the
 strict scan produced 9 diagnostics; none affected a verdict.
 
 **Tooling detection is evidence-based, and evidence can be missing.** A package
@@ -400,13 +404,19 @@ line is left alone with a reason, rather than reformatted.
 
 **Nested manifests are not scanned.** A directory with its own `package.json` is
 a different project answering to a different manifest, so `shed` stops at it,
-names it, and refuses to `--fix`. Point `shed` at each package. Workspaces are
-not resolved as a unit.
+names it, and refuses to `--fix`. Because part of the tree then went unread, no
+package is reported as confidently unimported either — absence cannot be proven
+from a partial scan. Point `shed` at each package. Workspaces are not resolved
+as a unit.
 
-**Browser targets are outside its model.** Every version judgement `shed` makes
-is about Node. A bundled front-end may not have the API at all, or may have it
-only in a secure context (`crypto.randomUUID`). `shed` detects a bundler config
-and says so, but it cannot reason about browser support.
+**Browser targets get a narrower answer, not a wrong one.** Every version
+judgement `shed` makes is about Node. When a project looks browser-targeted — a
+bundler config, a `browserslist` or `browser` field — any replacement naming a
+`node:` builtin, `Buffer`, or a Node-only `crypto` function is reported
+`blocked` rather than recommended, since it does not exist there at all. APIs
+browsers do have are still offered, with a header warning: `crypto.randomUUID`
+is real in a browser but only in a secure context, and `shed` cannot check that
+for you.
 
 **A peer requirement shields a package from being called dead.** If anything in
 the lockfile declares a package as a non-optional peer, `shed` classifies it
@@ -458,7 +468,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 265 tests, node:test only
+make test      # 273 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:

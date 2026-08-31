@@ -115,6 +115,8 @@ function runScan(positionals, painter, io, flags) {
     floor,
     ignore,
     configText: loadConfigText(dir, pkg),
+    browserTargeted: looksBrowserTargeted(dir, pkg),
+    partialScan: walk.nested.length > 0,
     peers: new Set([
       ...(lock ? peerRequirements(lock) : []),
       ...impliedTooling(dir, walk.files, [...declaredDependencies(pkg).keys()]),

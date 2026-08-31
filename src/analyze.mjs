@@ -153,6 +153,16 @@ function namedInConfig(configText, name) {
 }
 
 /**
+ * Replacements that simply do not exist in a browser.
+ *
+ * `crypto.randomUUID` is deliberately absent: it exists in browsers, in a secure
+ * context, which the header banner already warns about. These are the ones with
+ * no browser equivalent at all - recommending them to a bundled front-end is not
+ * a caveat, it is a wrong answer.
+ */
+const BROWSER_UNSAFE_API = /node:|Buffer|crypto\.(createHash|createHmac|randomBytes|scrypt|timingSafeEqual|randomFill)|(^|\s)fs\.|child_process|process\.loadEnvFile/;
+
+/**
  * @typedef {object} Finding
  * @property {string} name
  * @property {string} range        the version range the manifest declares
@@ -177,9 +187,14 @@ function namedInConfig(configText, name) {
  * @param {Set<string>} [options.ignore] package names to leave out entirely
  * @param {string} [options.configText] text where a package may be named without being imported
  * @param {Set<string>} [options.peers] names required as a peer, or implied by the project's shape
+ * @param {boolean} [options.browserTargeted] the project builds for browsers, not Node
+ * @param {boolean} [options.partialScan] some of the tree was not scanned (nested manifests)
  * @returns {{ findings: Finding[], errors: import('./errors.mjs').Diagnostic[], scanned: number, totals: object }}
  */
-export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText = '', peers = new Set() }) {
+export function analyze({
+  dir, pkg, files, floor, ignore = new Set(), configText = '', peers = new Set(),
+  browserTargeted = false, partialScan = false,
+}) {
   const declared = declaredDependencies(pkg);
 
   /** @type {Map<string, Site[]>} */
@@ -208,7 +223,13 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
     const found = extractImports(text, file);
     errors.push(...found.errors);
     for (const name of looseReferences(text)) loose.add(name);
-    for (const literal of found.strings) literals.add(literal);
+    // Only specifier-shaped names count. A package called `debug`, `got` or
+    // `async` collides with ordinary string values - `if (level === 'debug')` -
+    // and shielding it forever costs usefulness for no safety gain. A name with
+    // a hyphen, slash or dot is not something anyone types by accident.
+    for (const literal of found.strings) {
+      if (/[-/.@]/.test(literal)) literals.add(literal);
+    }
 
     /** @type {Set<string>} */
     const inThisFile = new Set();
@@ -265,7 +286,9 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       }
     } else if (found.length === 0) {
       verdict = 'unreferenced';
-      because = literals.has(name)
+      because = partialScan
+        ? 'nothing imports it in the part of the tree shed scanned - other packages here were not read'
+        : literals.has(name)
         ? 'nothing imports it, but its name appears as a string in the source - it may be loaded by name at runtime'
         : loose.has(name)
         ? 'no import shed can confirm, but a permissive scan saw the name - too close to call, so --fix will not touch it'
@@ -282,6 +305,11 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
     } else if (!gte(floor.version, entry.since)) {
       verdict = 'bump';
       because = `${entry.api} needs Node ${entry.since}; this project's floor is ${floor.version}`;
+    } else if (browserTargeted && BROWSER_UNSAFE_API.test(entry.api)) {
+      // The signal was already computed and already printed as a banner. A
+      // banner does not stop anyone acting on the verdict printed beside it.
+      verdict = 'blocked';
+      because = `${entry.api} is a Node API and this project builds for browsers`;
     } else {
       verdict = 'removable';
       because = entry.rationale;
@@ -301,7 +329,10 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       scripts,
       // A permissive scan disagreeing with the strict one is enough to block a
       // deletion, though not enough to claim the package is used.
-      unconfirmed: found.length === 0 && (loose.has(name) || literals.has(name)),
+      // A scan that skipped part of the tree cannot prove absence: the import
+      // that would vouch for this package may be in a directory shed did not
+      // enter.
+      unconfirmed: found.length === 0 && (loose.has(name) || literals.has(name) || partialScan),
     });
   }
 

@@ -212,6 +212,9 @@ export function toJSON(report) {
       caveats: f.caveats,
       caveatCount: f.caveatCount,
       scripts: f.scripts,
+      // Surfaced because a consumer scripting against --json needs to know the
+      // difference between "nothing imports this" and "shed would not act on it".
+      unconfirmed: f.unconfirmed,
     })),
     errors: report.errors.map((e) => ({
       file: e.pos.file, line: e.pos.line, col: e.pos.col, message: e.message,
