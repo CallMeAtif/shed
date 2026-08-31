@@ -319,7 +319,7 @@ const CLAUSE_PUNCT = new Set(['{', '}', ',', '*']);
  *
  * @param {string} source
  * @param {string} file
- * @returns {{ imports: FoundImport[], errors: Diagnostic[], comments: [number, number][], strings: string[] }}
+ * @returns {{ imports: FoundImport[], errors: Diagnostic[], comments: [number, number][], named: string[] }}
  */
 export function extractImports(source, file) {
   const { tokens, errors, comments } = tokenize(source, file);
@@ -435,11 +435,34 @@ export function extractImports(source, file) {
     }
   }
 
-  // Every string literal in the file. A package can be named at runtime rather
-  // than imported - `pino({ transport: { target: 'pino-pretty' } })` - and an
-  // import-based scan is blind to it. Used only to veto a deletion.
-  const strings = [...new Set(tokens.filter((t) => t.type === 'string').map((t) => t.value))];
-  return { imports, errors, comments, strings };
+  // A package can be named at runtime rather than imported, and an import-based
+  // scan is blind to it. But position is what separates a name being *loaded*
+  // from a value being *compared*:
+  //
+  //   { target: 'pino-pretty' }   a name  - the string follows a ':'
+  //   { plugins: ['sharp'] }      a name  - inside a property's array
+  //   if (level === 'debug')      a value - the string follows an operator
+  //
+  // Only the first kind is evidence that a dependency is in use.
+  /** @type {Set<string>} */
+  const named = new Set();
+  for (let j = 0; j < tokens.length; j++) {
+    if (tokens[j].type !== 'string') continue;
+    const prev = tokens[j - 1];
+    if (prev?.type !== 'punct') continue;
+    if (prev.value === ':') {
+      named.add(tokens[j].value);
+      continue;
+    }
+    // An array literal in property-value position: `plugins: ['sharp', 'x']`.
+    if (prev.value === '[' || prev.value === ',') {
+      const opener = findArrayOpener(tokens, j);
+      if (opener !== -1 && tokens[opener - 1]?.type === 'punct' && tokens[opener - 1].value === ':') {
+        named.add(tokens[j].value);
+      }
+    }
+  }
+  return { imports, errors, comments, named: [...named] };
 }
 
 /**
@@ -487,4 +510,25 @@ export function looseReferences(source) {
     if (name) names.add(name);
   }
   return names;
+}
+
+/**
+ * Walk back from a string inside an array literal to the `[` that opened it.
+ *
+ * @param {Token[]} tokens
+ * @param {number} from index of the string token
+ * @returns {number} index of the opening bracket, or -1
+ */
+function findArrayOpener(tokens, from) {
+  let depth = 0;
+  for (let j = from - 1; j >= 0 && from - j < 64; j--) {
+    const token = tokens[j];
+    if (token.type !== 'punct') continue;
+    if (token.value === ']') depth++;
+    else if (token.value === '[') {
+      if (depth === 0) return j;
+      depth--;
+    } else if (token.value === '{' || token.value === ';') return -1;
+  }
+  return -1;
 }

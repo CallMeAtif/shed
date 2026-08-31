@@ -223,13 +223,10 @@ export function analyze({
     const found = extractImports(text, file);
     errors.push(...found.errors);
     for (const name of looseReferences(text)) loose.add(name);
-    // Only specifier-shaped names count. A package called `debug`, `got` or
-    // `async` collides with ordinary string values - `if (level === 'debug')` -
-    // and shielding it forever costs usefulness for no safety gain. A name with
-    // a hyphen, slash or dot is not something anyone types by accident.
-    for (const literal of found.strings) {
-      if (/[-/.@]/.test(literal)) literals.add(literal);
-    }
+    // Position decides: a string in property-value position is a name being
+    // loaded, a comparison operand is not. Shape is the wrong proxy - it saved
+    // `pino-pretty` but not `{ testEnvironment: 'jsdom' }`.
+    for (const literal of found.named) literals.add(literal);
 
     /** @type {Set<string>} */
     const inThisFile = new Set();

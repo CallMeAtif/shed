@@ -611,3 +611,55 @@ test('the string-literal veto only fires on specifier-shaped names', async (t) =
     assert.equal(json.findings.find((f) => f.name === 'pino-pretty').unconfirmed, true);
   });
 });
+
+test('the runtime-name veto keys on position, not on the shape of the name', async (t) => {
+  const dir = makeProject(
+    {
+      name: 't',
+      engines: { node: '>=22.0.0' },
+      dependencies: {
+        jsdom: '^24.0.0',
+        sharp: '^0.33.0',
+        debug: '^4.0.0',
+        'pino-pretty': '^11.0.0',
+        'genuinely-dead': '^1.0.0',
+      },
+    },
+    {
+      'src/a.js': [
+        "export const cfg = { testEnvironment: 'jsdom', imageBackend: 'sharp' };",
+        "export const t = { transport: { target: 'pino-pretty' } };",
+        "export const plugins = { loaders: ['sharp'] };",
+        "export function lvl(l) { return l === 'debug'; }",
+        '',
+      ].join('\n'),
+    },
+  );
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { json } = report(dir, ['--all']);
+  const unconfirmed = (name) => json.findings.find((f) => f.name === name).unconfirmed;
+
+  await t.test('a single-word name in property-value position is protected', () => {
+    assert.equal(unconfirmed('jsdom'), true);
+    assert.equal(unconfirmed('sharp'), true);
+  });
+
+  await t.test('a hyphenated name in property-value position is protected', () => {
+    assert.equal(unconfirmed('pino-pretty'), true);
+  });
+
+  await t.test('a comparison operand is not evidence of use', () => {
+    assert.equal(unconfirmed('debug'), false);
+  });
+
+  await t.test('and a name mentioned nowhere is still removed', () => {
+    const { stdout } = run([dir, '--fix']);
+    assert.match(stdout, /genuinely-dead/);
+    const after = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    assert.equal(after.dependencies.jsdom, '^24.0.0');
+    assert.equal(after.dependencies.sharp, '^0.33.0');
+    assert.equal(after.dependencies['pino-pretty'], '^11.0.0');
+    assert.equal(after.dependencies.debug, undefined);
+    assert.equal(after.dependencies['genuinely-dead'], undefined);
+  });
+});

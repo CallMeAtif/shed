@@ -340,10 +340,10 @@ produce the same bytes.
 
 ```
 $ make build && sha256sum dist/shed.mjs
-1b61c27fba96ef044bc9638d4e77da67b8b644b264d60c5e506f72bfe3dd5307  dist/shed.mjs
+d977d6b1f56d0aed5574e5f995ae35fa38cc7fda6b8f8858a1730c317c56ab8d  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-1b61c27fba96ef044bc9638d4e77da67b8b644b264d60c5e506f72bfe3dd5307  dist/shed.mjs
+d977d6b1f56d0aed5574e5f995ae35fa38cc7fda6b8f8858a1730c317c56ab8d  dist/shed.mjs
 ```
 
 ---
@@ -389,9 +389,9 @@ used to claim a package **is** used — only to refuse to claim it is not. If th
 loose scan sees a name the strict one did not, that package is reported as too
 close to call and `--fix` will not touch it. The same veto covers a package
 named as a string literal rather than imported — `pino({ transport: { target:
-'pino-pretty' } })` — but only for specifier-shaped names containing a hyphen,
-slash or dot. A package called `debug` or `got` collides with ordinary string
-values, and shielding it forever would cost usefulness for no safety. On a 290-file React project the
+'pino-pretty' } })` — decided by the string's *position*, not its spelling. A
+string in property-value position is a name being loaded; a comparison operand
+(`if (level === 'debug')`) is not, and does not shield anything. On a 290-file React project the
 strict scan produced 9 diagnostics; none affected a verdict.
 
 **Tooling detection is evidence-based, and evidence can be missing.** A package
@@ -468,7 +468,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 273 tests, node:test only
+make test      # 278 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:
