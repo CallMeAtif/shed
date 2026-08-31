@@ -4,8 +4,12 @@
  * This is the job esbuild or rollup would normally do. Doing it by hand is
  * tractable because the input is not arbitrary JavaScript - it is this
  * repository, which uses a deliberately narrow subset of ESM (single-line named
- * imports, named exports only, no circular edges). The bundler asserts that
- * subset and fails loudly rather than silently emitting something wrong.
+ * imports, named exports only, no circular edges). The bundler asserts the
+ * import and export *forms* it supports and fails loudly on anything else.
+ * Circular edges are assumed, not verified: a cycle would recurse forever at
+ * runtime rather than being caught here. Nothing in src/ has one, and the check
+ * is not worth the risk of adding at this stage - but the claim should not be
+ * broader than the code.
  *
  * Each module becomes a lazily-initialised function returning its exports, so
  * module scopes stay separate and identifiers cannot collide. That is what makes

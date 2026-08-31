@@ -340,10 +340,10 @@ produce the same bytes.
 
 ```
 $ make build && sha256sum dist/shed.mjs
-c41442da53579e06b5570672cc271c2a8427cd9d6a64be818bfdf392d23080d9  dist/shed.mjs
+852445cfc8843ce8c1e04c1cfd0736814861f9dbdc0becefbf6674bca2233e20  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-c41442da53579e06b5570672cc271c2a8427cd9d6a64be818bfdf392d23080d9  dist/shed.mjs
+852445cfc8843ce8c1e04c1cfd0736814861f9dbdc0becefbf6674bca2233e20  dist/shed.mjs
 ```
 
 ---
@@ -352,8 +352,12 @@ c41442da53579e06b5570672cc271c2a8427cd9d6a64be818bfdf392d23080d9  dist/shed.mjs
 
 Written before the tool felt finished, and kept honest.
 
-**The knowledge base is a curated list, not a registry.** 62 entries. Anything
-outside it is reported `unknown`, never guessed at. Download counts are static
+**The knowledge base is a curated list, not a registry.** 100 entries. Anything
+outside it is reported `unknown`, never guessed at. On a large React
+application that means roughly a third of dependencies get a verdict: most of
+the rest — UI component libraries, a rendering framework, a test runner's
+ecosystem — have no standard-library answer, and inventing one for them would be
+worse than saying nothing. Download counts are static
 figures noted by hand on 31 August 2026 and will age — `shed` makes no network
 requests, by design.
 
@@ -470,7 +474,7 @@ bin/shed.mjs          entry point, deliberately thin
 src/scanner/imports   the character scanner and token stream
 src/semver.mjs        version comparison and range satisfaction
 src/gitignore.mjs     .gitignore matching
-src/knowledge.mjs     the 62-entry mapping table — data, not code
+src/knowledge.mjs     the 100-entry mapping table — data, not code
 src/analyze.mjs       the verdict engine
 src/fix.mjs           the only edit shed will make, and its three guards
 src/lockfile/npm.mjs  the resolution graph, and what removal actually frees
