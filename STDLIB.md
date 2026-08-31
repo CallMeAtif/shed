@@ -37,7 +37,7 @@ isn't. Patterns without a slash match at any depth while patterns with one are
 anchored; a trailing slash restricts a rule to directories *but still ignores
 everything beneath it*; `!` un-ignores; and the **last** matching rule wins, not
 the first. All four are load-bearing in real repositories and all four are
-implemented, with 18 tests.
+implemented, with 24 tests.
 
 The bug worth recording: my first version skipped directory-only rules when
 testing a file, so `dist/` correctly ignored the `dist` directory and then failed
@@ -98,7 +98,7 @@ works".
 
 ### 7. `mocha` / `jest` / `vitest` → `node:test` + `node:assert/strict`
 
-159 tests, no runner installed. Nested `t.test()` subtests give the same
+194 tests, no runner installed. Nested `t.test()` subtests give the same
 structure `describe`/`it` would. The one thing genuinely missing versus Jest is
 module mocking, which this codebase does not need — every module takes its
 dependencies as parameters, and `main()` takes its IO as an argument specifically
