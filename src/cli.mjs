@@ -47,12 +47,12 @@ export const OPTIONS = {
     placeholder: '<pkg>',
     help: 'Exclude a package from the report (repeatable)',
   },
-  'min-severity': {
-    type: 'string',
-    default: 'removable',
-    choices: ['removable', 'bump', 'blocked', 'unknown'],
-    placeholder: '<level>',
-    help: 'Lowest verdict to report: removable, bump, blocked, unknown',
+  all: {
+    type: 'boolean',
+    short: 'a',
+    default: false,
+    placeholder: '',
+    help: 'Also report unreferenced packages and ones with no known mapping',
   },
   color: {
     type: 'boolean',

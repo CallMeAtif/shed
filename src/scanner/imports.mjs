@@ -195,6 +195,7 @@ export function tokenize(source, file) {
 
     if (c === '/' && regexAllowed()) {
       const start = here();
+      const rewind = { i, line, col };
       bump();
       let inClass = false;
       let closed = false;
@@ -215,7 +216,13 @@ export function tokenize(source, file) {
         bump();
       }
       if (!closed) {
-        fail('unterminated regular expression literal', start);
+        // A regex literal cannot span a line, so an unclosed one was never a
+        // regex: it is division, or the `/` of a JSX closing tag. Rewind and
+        // treat it as punctuation rather than reporting a parse error - JSX
+        // alone would otherwise produce thousands of false diagnostics.
+        ({ i, line, col } = rewind);
+        bump();
+        emit('punct', '/', start);
         continue;
       }
       while (i < source.length && isIdentPart(source[i])) bump(); // flags

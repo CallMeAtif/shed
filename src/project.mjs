@@ -1,0 +1,183 @@
+/**
+ * Reading a project off disk: its manifest, its Node floor, and its source files.
+ *
+ * Everything here is filesystem-only. shed never spawns `npm`, `git` or anything
+ * else to learn about a project - it reads the files those tools already wrote,
+ * which is what keeps the artifact honestly dependency-free.
+ */
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { Diagnostic } from './errors.mjs';
+import { lowerBound } from './semver.mjs';
+
+/** Source extensions worth scanning for imports. */
+export const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts']);
+
+/** Directories never worth walking, whatever .gitignore says. */
+const ALWAYS_PRUNE = new Set(['node_modules', '.git', '.hg', '.svn']);
+
+/**
+ * Files above this size are almost always bundles or vendored blobs. Scanning
+ * them is slow and their imports are not the project's own, so they are skipped
+ * and counted rather than parsed.
+ */
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+/** @typedef {{ range: string, field: string }} Declared */
+
+/**
+ * @param {string} dir
+ * @returns {{ pkg: object, path: string }}
+ * @throws {Diagnostic} when the manifest is missing or unparseable
+ */
+export function loadManifest(dir) {
+  const path = join(dir, 'package.json');
+  if (!existsSync(path)) {
+    throw new Diagnostic('no package.json here - point shed at a JavaScript project', {
+      file: path, line: 1, col: 1, offset: 0,
+    });
+  }
+  const text = readFileSync(path, 'utf8');
+  try {
+    return { pkg: JSON.parse(text), path };
+  } catch (err) {
+    // V8 reports a character offset; turn it into a line and column so the
+    // failure reads like every other diagnostic shed prints.
+    const at = /position (\d+)/.exec(/** @type {Error} */ (err).message);
+    const offset = at ? Number(at[1]) : 0;
+    const before = text.slice(0, offset);
+    const line = before.split('\n').length;
+    const col = offset - before.lastIndexOf('\n');
+    throw new Diagnostic(`package.json is not valid JSON: ${/** @type {Error} */ (err).message}`, {
+      file: path, line, col, offset,
+    }, text.split('\n')[line - 1]);
+  }
+}
+
+/**
+ * Every dependency the manifest declares, across all four dependency fields.
+ *
+ * peerDependencies are excluded: they are a contract with the consumer rather
+ * than something this project installs.
+ *
+ * @param {object} pkg
+ * @returns {Map<string, Declared>}
+ */
+export function declaredDependencies(pkg) {
+  /** @type {Map<string, Declared>} */
+  const deps = new Map();
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+    const block = pkg[field];
+    if (!block || typeof block !== 'object') continue;
+    for (const [name, range] of Object.entries(block)) {
+      // A package listed twice keeps its first, more meaningful, field.
+      if (!deps.has(name)) deps.set(name, { range: String(range), field });
+    }
+  }
+  return deps;
+}
+
+/**
+ * The Node version a recommendation has to clear.
+ *
+ * `engines.node` is the honest answer when it exists, because it is what the
+ * project promises to run on. Falling back to the running Node would let shed
+ * recommend an API the project's own users cannot call.
+ *
+ * @param {object} pkg
+ * @param {string} [override] value of --node
+ * @returns {{ version: string, source: 'flag'|'engines'|'runtime' }}
+ */
+export function resolveNodeFloor(pkg, override) {
+  if (override) {
+    const floor = lowerBound(override) ?? override.replace(/^v/, '');
+    return { version: floor, source: 'flag' };
+  }
+  const declared = pkg?.engines?.node;
+  if (typeof declared === 'string') {
+    const floor = lowerBound(declared);
+    if (floor) return { version: floor, source: 'engines' };
+  }
+  return { version: process.version.replace(/^v/, ''), source: 'runtime' };
+}
+
+/** @typedef {{ files: string[], skipped: { path: string, reason: string }[] }} Walk */
+
+/**
+ * Collect source files under `dir`, pruning ignored directories as it goes.
+ *
+ * Pruning at the directory level rather than filtering a full listing is the
+ * whole performance story: a repository with node_modules present is otherwise
+ * dominated by paths that were never going to be scanned.
+ *
+ * @param {string} dir
+ * @param {import('./gitignore.mjs').Ignore} ignore
+ * @returns {Walk}
+ */
+export function walkSource(dir, ignore) {
+  /** @type {string[]} */
+  const files = [];
+  /** @type {{ path: string, reason: string }[]} */
+  const skipped = [];
+
+  /** @param {string} absolute */
+  const visit = (absolute) => {
+    /** @type {import('node:fs').Dirent[]} */
+    let entries;
+    try {
+      entries = readdirSync(absolute, { withFileTypes: true });
+    } catch (err) {
+      skipped.push({ path: toRelative(dir, absolute), reason: /** @type {Error} */ (err).code ?? 'unreadable' });
+      return;
+    }
+
+    for (const entry of entries) {
+      const child = join(absolute, entry.name);
+      const rel = toRelative(dir, child);
+
+      if (entry.isDirectory()) {
+        if (ALWAYS_PRUNE.has(entry.name)) continue;
+        if (ignore.ignores(rel, true)) continue;
+        visit(child);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const dot = entry.name.lastIndexOf('.');
+      if (dot === -1 || !SOURCE_EXTENSIONS.has(entry.name.slice(dot))) continue;
+      if (ignore.ignores(rel, false)) continue;
+
+      try {
+        if (statSync(child).size > MAX_FILE_BYTES) {
+          skipped.push({ path: rel, reason: 'larger than 2 MB, assumed to be a bundle' });
+          continue;
+        }
+      } catch {
+        skipped.push({ path: rel, reason: 'unreadable' });
+        continue;
+      }
+      files.push(rel);
+    }
+  };
+
+  visit(dir);
+  files.sort(); // deterministic output regardless of filesystem ordering
+  return { files, skipped };
+}
+
+/** Repository-relative, forward-slashed, for both display and pattern matching. */
+function toRelative(root, absolute) {
+  return relative(root, absolute).split(sep).join('/');
+}
+
+/**
+ * Load the ignore rules for a project: its .gitignore plus shed's own defaults.
+ * @param {string} dir
+ * @param {typeof import('./gitignore.mjs').Ignore} Ignore
+ * @param {string[]} extra
+ */
+export function loadIgnore(dir, Ignore, extra = []) {
+  const path = join(dir, '.gitignore');
+  const content = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  return Ignore.parse(content, ['node_modules/', '.git/', ...extra]);
+}
