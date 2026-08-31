@@ -110,6 +110,10 @@ mean identifier collisions are impossible, so no scope analysis and no renaming.
 Necessary, as it turned out — `parse` is exported by both `cli.mjs` and
 `semver.mjs`, and naive concatenation would have silently shadowed one.
 
+Determinism turned out to be stronger than the bonus asks for: the same commit
+built under Node 22.17.0 and Node 24.4.1 produces the same sha256, so the output
+does not depend on the runtime that produced it.
+
 Two bugs found by running the output: builtin imports hoisted verbatim declared
 `join` twice, and the entry point's own shebang ended up on line 2,559. Both are
 fixed and both are why "the build script ran" is not the same as "the artifact

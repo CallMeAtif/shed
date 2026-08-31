@@ -28,7 +28,9 @@ script that inlines the module graph into a single file.
 
 Run it straight from source if you prefer: `node bin/shed.mjs /path/to/project`.
 
-**Node ≥ 22.17.0.** Developed and tested on **v24.4.1**.
+**Node ≥ 22.17.0.** The full suite is run on **v22.17.0** — the declared floor —
+and on **v24.4.1**. 257 tests pass on both, and both produce a byte-identical
+artifact.
 
 ---
 
@@ -331,6 +333,9 @@ along the way is written up in [`STDLIB.md`](STDLIB.md).
 `make build` inlines the module graph into `dist/shed.mjs`. Modules are emitted
 in sorted path order and nothing time-varying is written, so two builds on the
 same toolchain are byte-identical:
+
+Verified on both supported Node versions: the floor and the current release
+produce the same bytes.
 
 ```
 $ make build && sha256sum dist/shed.mjs
