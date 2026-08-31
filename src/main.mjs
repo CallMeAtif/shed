@@ -12,11 +12,11 @@ import { parse, helpText } from './cli.mjs';
 import { colorEnabled, createPainter } from './render/ansi.mjs';
 import { analyze, humanCount, VERDICT_ORDER } from './analyze.mjs';
 import { renderText, toJSON } from './report.mjs';
-import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText, impliedTooling } from './project.mjs';
+import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText, impliedTooling, looksBrowserTargeted } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 import { planFix, removeDependencies } from './fix.mjs';
-import { parseNpmLock, removalImpact, peerRequirements } from './lockfile/npm.mjs';
+import { parseNpmLock, removalImpact, peerRequirements, retainedBy } from './lockfile/npm.mjs';
 
 /**
  * Replaced with a literal by tools/bundle.mjs, so the built artifact carries its
@@ -120,6 +120,8 @@ function runScan(positionals, painter, io, flags) {
     ...analysis,
     impact: measureImpact(lock, analysis.findings),
     blockers: scanBlockers(walk, analysis),
+    nested: walk.nested,
+    browserTargeted: looksBrowserTargeted(dir, pkg),
   };
 
   if (flags.fix) return applyFix(report, manifestPath, painter, io);
@@ -174,6 +176,9 @@ function measureImpact(lock, findings) {
     removable: measure(removable),
     unreferenced: measure(unreferenced),
     both: measure([...removable, ...unreferenced]),
+    // A package a survivor still requires stays on disk whatever the manifest
+    // says, so the user should hear that before doing the rewrite.
+    retained: Object.fromEntries(retainedBy(lock, [...removable, ...unreferenced])),
   };
 }
 
@@ -188,6 +193,12 @@ function measureImpact(lock, findings) {
  */
 function scanBlockers(walk, analysis) {
   const blockers = [];
+  if (walk.nested.length > 0) {
+    blockers.push(
+      `${walk.nested.length} nested package.json file(s) were found (${walk.nested.join(', ')}) ` +
+      'and their source answers to a different manifest; point shed at each one',
+    );
+  }
   if (walk.skipped.length > 0) {
     blockers.push(`${walk.skipped.length} file(s) were skipped and never read`);
   }

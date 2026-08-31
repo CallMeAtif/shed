@@ -279,7 +279,7 @@ export const ENTRIES = [
     api: 'a Promise.race pool (~20 lines)',
     since: '18.0.0',
     confidence: 'partial',
-    rationale: 'No stdlib API exists; the replacement is code you write, which is why this is reported as partial.',
+    rationale: 'There is no stdlib API for this at all - the replacement is roughly twenty lines of Promise.race you write and own.',
   },
   {
     pkg: 'lodash.get',
@@ -287,7 +287,8 @@ export const ENTRIES = [
     api: 'optional chaining (?.)',
     since: '14.0.0',
     confidence: 'partial',
-    rationale: 'Language syntax replaces the package unless paths are computed at runtime.',
+    rationale: 'Optional chaining replaces it for literal paths; a path computed at runtime needs a reduce over split(\'.\').',
+    caveats: ['get(obj,', 'get(data,', '.get(', 'lodash.get('],
   },
   {
     pkg: 'deepmerge',
@@ -374,8 +375,8 @@ export const ENTRIES = [
     api: 'crypto.scrypt()',
     since: '10.5.0',
     confidence: 'partial',
-    rationale: 'scrypt is a memory-hard KDF in core, but it is a different algorithm - existing bcrypt hashes cannot be verified with it.',
-    caveats: ['compare(', 'compareSync'],
+    rationale: 'scrypt is a memory-hard KDF in core, but it is a different algorithm: every existing hash must be re-derived on next login, so this is a migration, not a swap.',
+    caveats: ['compare(', 'compareSync', 'hashSync', '.hash('],
   },
   {
     pkg: 'bcryptjs',
@@ -383,8 +384,8 @@ export const ENTRIES = [
     api: 'crypto.scrypt()',
     since: '10.5.0',
     confidence: 'partial',
-    rationale: 'Same trade as bcrypt, and the pure-JS implementation is slower than the core one it would be replaced by.',
-    caveats: ['compare(', 'compareSync'],
+    rationale: 'Same migration as bcrypt - existing hashes stop verifying - though the pure-JS implementation being replaced is also the slower one.',
+    caveats: ['compare(', 'compareSync', 'hashSync', '.hash('],
   },
   {
     pkg: 'qs',
@@ -462,7 +463,8 @@ export const ENTRIES = [
     api: 'a filter and a join',
     since: '18.0.0',
     confidence: 'partial',
-    rationale: 'Conditional class names are Object.entries().filter().map().join(\' \') - five lines, no package.',
+    rationale: 'String and object arguments are a filter and a join; the nested-array form clsx also accepts needs a small recursive helper, nearer a dozen lines than five.',
+    caveats: ['clsx({', 'clsx([', 'ClassValue'],
   },
   {
     pkg: 'classnames',
@@ -470,7 +472,8 @@ export const ENTRIES = [
     api: 'a filter and a join',
     since: '18.0.0',
     confidence: 'partial',
-    rationale: 'Identical to clsx; the package predates the syntax that makes it unnecessary.',
+    rationale: 'Identical to clsx, including the nested-array form that makes the one-liner version wrong.',
+    caveats: ['classNames({', 'classNames(['],
   },
   {
     pkg: 'dayjs',

@@ -182,3 +182,34 @@ export function peerRequirements(lock) {
   }
   return required;
 }
+
+/**
+ * For each name being removed, the surviving dependency that still requires it.
+ *
+ * Removing `clsx` from a manifest frees nothing if `class-variance-authority`
+ * hard-depends on it: the package stays in node_modules, and the rewrite you were
+ * about to do buys you no dependency reduction at all. Knowing that before you
+ * start is worth more than the recommendation itself.
+ *
+ * @param {Lock} lock
+ * @param {Iterable<string>} removed
+ * @returns {Map<string, string>} removed name -> the survivor keeping it
+ */
+export function retainedBy(lock, removed) {
+  const removing = new Set(removed);
+  const keeping = lock.roots.filter((name) => !removing.has(name));
+
+  /** @type {Map<string, string>} */
+  const retained = new Map();
+  for (const name of removing) {
+    const path = resolveFrom(lock, '', name);
+    if (!path) continue;
+    for (const survivor of keeping) {
+      if (reachable(lock, [survivor]).has(path)) {
+        retained.set(name, survivor);
+        break;
+      }
+    }
+  }
+  return retained;
+}

@@ -8,7 +8,7 @@ import { pad, stringWidth, truncate, wrap } from './render/width.mjs';
 
 /** Section heading and accent colour for each verdict. */
 const SECTIONS = {
-  removable: { title: 'REMOVABLE', tone: 'boldGreen', lead: 'the standard library covers every use shed can see' },
+  removable: { title: 'REMOVABLE', tone: 'boldGreen', lead: 'nothing in your code blocks the swap - the rationale says what it costs' },
   bump: { title: 'NEEDS A NODE BUMP', tone: 'boldYellow', lead: 'the replacement exists above this project\'s floor' },
   blocked: { title: 'BLOCKED', tone: 'boldRed', lead: 'the code uses something the replacement does not cover' },
   unreferenced: { title: 'UNREFERENCED', tone: 'dim', lead: 'declared, but nothing imports it' },
@@ -44,6 +44,18 @@ export function renderText(report, { painter, all = false, quiet = false, width 
   const depNoun = report.totals.declared === 1 ? 'dependency' : 'dependencies';
   out.push(c.dim(`scanned ${report.scanned} ${fileNoun}, ${report.totals.declared} declared ${depNoun}`));
 
+  if (report.browserTargeted) {
+    out.push(c.dim('  this looks like a browser bundle; shed judges Node versions only, and a stdlib'));
+    out.push(c.dim('  API available on that Node floor may still be absent or restricted in browsers'));
+  }
+
+  if (report.nested?.length > 0) {
+    out.push('');
+    out.push(c.boldYellow(`${report.nested.length} nested package.json found - not scanned`));
+    for (const path of report.nested) out.push(`  ${c.dim(path)}`);
+    out.push(c.dim('  Those directories answer to their own manifest. Run shed in each one.'));
+  }
+
   const visible = all ? new Set(VERDICT_ORDER) : DEFAULT_VERDICTS;
 
   if (!quiet) {
@@ -55,7 +67,7 @@ export function renderText(report, { painter, all = false, quiet = false, width 
       const section = SECTIONS[verdict];
       out.push('');
       out.push(`${c[section.tone](section.title)} ${c.dim(`(${group.length}) - ${section.lead}`)}`);
-      for (const finding of group) out.push(...renderFinding(finding, c, width));
+      for (const finding of group) out.push(...renderFinding(finding, c, width, report.impact?.retained));
     }
   }
 
@@ -68,15 +80,22 @@ export function renderText(report, { painter, all = false, quiet = false, width 
  * @param {import('./analyze.mjs').Finding} finding
  * @param {ReturnType<import('./render/ansi.mjs').createPainter>} c
  * @param {number} width
+ * @param {Record<string, string>} [retained] package -> the survivor still requiring it
  */
-function renderFinding(finding, c, width) {
+function renderFinding(finding, c, width, retained = {}) {
   const lines = [];
   const reach = finding.entry?.weekly ? `${humanCount(finding.entry.weekly)}/wk` : '';
   const head =
     `  ${pad(c.bold(finding.name), 24 + (stringWidth(c.bold(finding.name)) - stringWidth(finding.name)))}` +
     `${pad(c.dim(reach), 12 + (stringWidth(c.dim(reach)) - stringWidth(reach)))}`;
 
-  lines.push(finding.entry ? `${head}${c.cyan(finding.entry.api)}` : head.trimEnd());
+  const api = finding.entry
+    ? `${c.cyan(finding.entry.api)}${finding.entry.confidence === 'partial' ? c.dim('  (partial)') : ''}`
+    : '';
+  lines.push(finding.entry ? `${head}${api}` : head.trimEnd());
+  if (retained[finding.name]) {
+    lines.push(`    ${c.yellow('still installed:')} ${c.dim(`${retained[finding.name]} depends on it, so removing it frees nothing`)}`);
+  }
   for (const line of wrap(finding.because, Math.max(40, width - 6))) {
     lines.push(`    ${c.dim(line)}`);
   }
@@ -168,6 +187,8 @@ export function toJSON(report) {
     totals: report.totals,
     impact: report.impact,
     blockers: report.blockers,
+    nested: report.nested,
+    browserTargeted: report.browserTargeted,
     findings: report.findings.map((f) => ({
       name: f.name,
       range: f.range,

@@ -22,7 +22,9 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const ENTRY = 'bin/shed.mjs';
 const OUT = 'dist/shed.mjs';
-const ROOT = resolve(process.cwd());
+// Anchored to this file, not the shell's working directory, so the build works
+// from anywhere rather than only from the repository root under make.
+const ROOT = resolve(import.meta.dirname, '..');
 
 /** `import { a, b } from 'spec';` - the only import form this repository uses. */
 const IMPORT_RE = /^import\s+\{([^}]*)\}\s+from\s+'([^']+)';?\s*$/;

@@ -101,7 +101,7 @@ export function resolveNodeFloor(pkg, override) {
   return { version: process.version.replace(/^v/, ''), source: 'runtime' };
 }
 
-/** @typedef {{ files: string[], skipped: { path: string, reason: string }[] }} Walk */
+/** @typedef {{ files: string[], skipped: { path: string, reason: string }[], nested: string[] }} Walk */
 
 /**
  * Collect source files under `dir`, pruning ignored directories as it goes.
@@ -119,6 +119,8 @@ export function walkSource(dir, ignore) {
   const files = [];
   /** @type {{ path: string, reason: string }[]} */
   const skipped = [];
+  /** @type {string[]} */
+  const nested = [];
 
   /** @param {string} absolute */
   const visit = (absolute) => {
@@ -138,6 +140,14 @@ export function walkSource(dir, ignore) {
       if (entry.isDirectory()) {
         if (ALWAYS_PRUNE.has(entry.name)) continue;
         if (ignore.ignores(rel, true)) continue;
+        // A directory with its own package.json is a different project, and its
+        // source answers to a different manifest. Walking into it made a
+        // workspace root report "nothing removable" about 554 files it had no
+        // business judging.
+        if (existsSync(join(child, 'package.json'))) {
+          nested.push(rel);
+          continue;
+        }
         visit(child);
         continue;
       }
@@ -162,7 +172,8 @@ export function walkSource(dir, ignore) {
 
   visit(dir);
   files.sort(); // deterministic output regardless of filesystem ordering
-  return { files, skipped };
+  nested.sort();
+  return { files, skipped, nested };
 }
 
 /** Repository-relative, forward-slashed, for both display and pattern matching. */
@@ -339,4 +350,30 @@ export function impliedTooling(dir, files) {
   if (typed) implied.add('typescript');
 
   return implied;
+}
+
+/** Config files that mean the output is a browser bundle, not a Node program. */
+const BUNDLER_CONFIGS = /^(vite|next|webpack|rollup|parcel|esbuild|astro|nuxt|svelte|remix)\.config\./i;
+
+/**
+ * Whether this project builds for browsers.
+ *
+ * It matters because every version judgement shed makes is about Node, and a
+ * browser bundle does not run on Node at all. `crypto.randomUUID` exists in
+ * browsers but only in a secure context; `node:` builtins do not exist there
+ * at all. shed cannot reason about that, so it says so rather than pretending
+ * the Node floor is the whole story.
+ *
+ * @param {string} dir
+ * @param {object} pkg
+ * @returns {boolean}
+ */
+export function looksBrowserTargeted(dir, pkg) {
+  if (pkg?.browserslist !== undefined || pkg?.browser !== undefined) return true;
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .some((entry) => entry.isFile() && BUNDLER_CONFIGS.test(entry.name));
+  } catch {
+    return false;
+  }
 }

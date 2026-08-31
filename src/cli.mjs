@@ -108,7 +108,10 @@ export function parse(argv) {
       allowNegative: true,
     });
   } catch (err) {
-    throw new UsageError(/** @type {Error} */ (err).message);
+    // parseArgs appends a positional-argument hint with an unbalanced quote,
+    // which reads like shed's own output is broken. Keep the useful half.
+    const message = /** @type {Error} */ (err).message.split('. To specify a positional')[0];
+    throw new UsageError(message.endsWith('.') ? message : `${message}.`);
   }
 
   const flags = { ...parsed.values };
