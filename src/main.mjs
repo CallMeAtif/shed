@@ -16,10 +16,23 @@ import { loadManifest, resolveNodeFloor, walkSource, loadIgnore } from './projec
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 
-/** Read once from the manifest so the version can never drift from the package. */
-export const VERSION = JSON.parse(
-  readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'),
-).version;
+/**
+ * Replaced with a literal by tools/bundle.mjs, so the built artifact carries its
+ * own version instead of reading a manifest that may not travel with it.
+ */
+const BAKED_VERSION = '0.0.0-dev';
+
+/** @returns {string} */
+function resolveVersion() {
+  if (BAKED_VERSION !== '0.0.0-dev') return BAKED_VERSION;
+  try {
+    return JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+export const VERSION = resolveVersion();
 
 /** @typedef {{ stdout: (s: string) => void, stderr: (s: string) => void, columns: number }} Io */
 

@@ -1,0 +1,25 @@
+shed - zero-dependency proof
+generated: 2026-08-31 (deterministic to the day)
+node: v24.4.1
+========================================================================
+
+1. MANIFEST
+   dependencies           0 entries
+   devDependencies        0 entries
+   peerDependencies       (absent)
+   optionalDependencies   (absent)
+   verdict: PASS - the manifest declares nothing
+
+2. INSTALLED PACKAGES
+   node_modules present: no
+   verdict: PASS - nothing was ever installed
+
+3. RESOLVED IMPORTS
+   files scanned:        21
+   builtin specifiers:   node:assert/strict, node:crypto, node:fs, node:module, node:os, node:path, node:test, node:util
+   relative specifiers:  28
+   third-party imports:  0
+   verdict: PASS - every import is a builtin or a local file
+
+========================================================================
+OVERALL: ZERO THIRD-PARTY DEPENDENCIES
