@@ -274,3 +274,26 @@ test('identifiers are Unicode, not ASCII', async (t) => {
     assert.deepEqual(specifiers("import \\u0041bc from 'chalk';"), ['chalk']);
   });
 });
+
+test('ES2022 string module names in a clause', async (t) => {
+  // Legal since ES2022 and emitted by wasm-bindgen and bundler output. A string
+  // token used to end the clause walk, so the whole import vanished silently.
+  await t.test('a quoted name inside an import clause', () => {
+    assert.deepEqual(specifiers('import { "a-b" as ab } from \'lodash\';'), ['lodash']);
+  });
+
+  await t.test('a quoted name on either side of an export alias', () => {
+    assert.deepEqual(specifiers('export { x as "y" } from \'lodash\';'), ['lodash']);
+    assert.deepEqual(specifiers('export { "a" as b } from \'lodash\';'), ['lodash']);
+    assert.deepEqual(specifiers('export { "a" as "b" } from \'lodash\';'), ['lodash']);
+  });
+
+  await t.test('a quoted namespace name', () => {
+    assert.deepEqual(specifiers('export * as "ns" from \'lodash\';'), ['lodash']);
+  });
+
+  await t.test('and a string that is not a clause still ends the walk', () => {
+    assert.deepEqual(specifiers("export default 'not-a-module';\nimport x from 'chalk';"), ['chalk']);
+    assert.deepEqual(specifiers("export const a = 'str';\nimport x from 'chalk';"), ['chalk']);
+  });
+});

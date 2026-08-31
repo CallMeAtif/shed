@@ -302,6 +302,10 @@ export function tokenize(source, file) {
  * Tokens that may legally appear inside an import or export *clause* - the part
  * between the keyword and `from`.
  *
+ * The full clause grammar admits exactly three token classes - identifiers,
+ * string module names (ES2022), and the punctuation `{ } , *` - plus the
+ * keywords `as`, `type` and `from`. Anything else ends the clause.
+ *
  * Bounding the search by the grammar rather than by a token count is what makes
  * this correct in both directions. A fixed lookahead both truncates long clauses
  * (an import of eighty aliased names silently disappears, and a tool that then
@@ -363,8 +367,17 @@ export function extractImports(source, file) {
         return null; // a semicolon, an operator, a literal
       }
 
+      // Inside the braces: names, aliases, and ES2022 string module names
+      // (`import { "a-b" as ab } from 'x'`). The depth check has to come before
+      // the type guard, or a string dies here rather than being skipped.
+      if (depth > 0) {
+        if (token.type === 'ident' || token.type === 'string') continue;
+        return null;
+      }
+
+      // `export * as "ns" from 'x'` puts a string at depth zero too.
+      if (token.type === 'string') continue;
       if (token.type !== 'ident') return null;
-      if (depth > 0) continue; // inside the braces: names and aliases
 
       if (token.value === 'from') {
         const next = tokens[j + 1];

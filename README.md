@@ -334,10 +334,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-ecc958397c4899c0c180ee4a4bc1d758ecb600b4d3af0206d80a6370859b8b0e  dist/shed.mjs
+4d07af089d76488b3b75dd054c63226ef44f552e0a0b34785e1524e59d4687a8  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-ecc958397c4899c0c180ee4a4bc1d758ecb600b4d3af0206d80a6370859b8b0e  dist/shed.mjs
+4d07af089d76488b3b75dd054c63226ef44f552e0a0b34785e1524e59d4687a8  dist/shed.mjs
 ```
 
 ---
@@ -439,7 +439,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 252 tests, node:test only
+make test      # 257 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:
