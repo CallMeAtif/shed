@@ -15,7 +15,7 @@ node: v24.4.1
    verdict: PASS - nothing was ever installed
 
 3. RESOLVED IMPORTS
-   files scanned:        25
+   files scanned:        26
    builtin specifiers:   node:assert/strict, node:crypto, node:fs, node:module, node:os, node:path, node:test, node:util
    relative specifiers:  33
    third-party imports:  0

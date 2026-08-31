@@ -243,3 +243,34 @@ test('a semicolon-less export must not steal the next statement\'s specifier', a
     assert.deepEqual(specifiers("export type { A } from 'chalk';"), ['chalk']);
   });
 });
+
+test('identifiers are Unicode, not ASCII', async (t) => {
+  // A missed identifier becomes a missed import, which becomes a deleted
+  // dependency. These all used to yield nothing.
+  await t.test('an accented default import', () => {
+    assert.deepEqual(specifiers("import café from 'chalk';"), ['chalk']);
+  });
+
+  await t.test('non-Latin scripts', () => {
+    assert.deepEqual(specifiers("import 数据 from 'lodash';"), ['lodash']);
+    assert.deepEqual(specifiers("import Привет from 'lodash';"), ['lodash']);
+  });
+
+  await t.test('inside a named clause, an alias, and a namespace', () => {
+    assert.deepEqual(specifiers("import { café, b } from 'lodash';"), ['lodash']);
+    assert.deepEqual(specifiers("import { a as café } from 'chalk';"), ['chalk']);
+    assert.deepEqual(specifiers("import * as café from 'lodash';"), ['lodash']);
+  });
+
+  await t.test('in a re-export clause', () => {
+    assert.deepEqual(specifiers("export { café } from 'lodash';"), ['lodash']);
+  });
+
+  await t.test('in a require binding', () => {
+    assert.deepEqual(specifiers("const café = require('chalk');"), ['chalk']);
+  });
+
+  await t.test('a unicode escape sequence in an identifier', () => {
+    assert.deepEqual(specifiers("import \\u0041bc from 'chalk';"), ['chalk']);
+  });
+});

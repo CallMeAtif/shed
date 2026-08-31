@@ -334,10 +334,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-d50753dd50aacdb28dc74a5b5972cd14f0c1e19bd49a47c8851ca45cab20d375  dist/shed.mjs
+ecc958397c4899c0c180ee4a4bc1d758ecb600b4d3af0206d80a6370859b8b0e  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-d50753dd50aacdb28dc74a5b5972cd14f0c1e19bd49a47c8851ca45cab20d375  dist/shed.mjs
+ecc958397c4899c0c180ee4a4bc1d758ecb600b4d3af0206d80a6370859b8b0e  dist/shed.mjs
 ```
 
 ---
@@ -418,9 +418,10 @@ in the manifest is invisible to `shed` today.
 
 **The semver implementation is a subset.** Comparators, `^`, `~`, wildcards,
 hyphen ranges, intersection and `||` union are supported, with whitespace between
-an operator and its version normalised first (`>= 18.0.0` is `>=18.0.0`). Prerelease handling is
-stricter than node-semver's: a prerelease satisfies a range only when it is at or
-above the range's lower bound. Build metadata is ignored, per spec.
+an operator and its version normalised first (`>= 18.0.0` is `>=18.0.0`). Prerelease inclusion follows node-semver: a prerelease
+satisfies a comparator set only if some comparator pins the same
+major.minor.patch and is itself a prerelease. Build metadata is parsed and
+ignored for ordering, per spec.
 
 **`--fix` only edits `package.json`.** It never rewrites source and never touches
 the lockfile. After a fix, run your package manager to prune the lock.
@@ -438,7 +439,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 235 tests, node:test only
+make test      # 252 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:

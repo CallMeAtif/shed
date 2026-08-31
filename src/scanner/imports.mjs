@@ -30,8 +30,11 @@ const REGEX_AFTER_KEYWORD = new Set([
 /** Punctuation after which a `/` is a division rather than a regex. */
 const VALUE_ENDING_PUNCT = new Set([')', ']', '}']);
 
-const isIdentStart = (c) => /[A-Za-z_$]/.test(c);
-const isIdentPart = (c) => /[A-Za-z0-9_$]/.test(c);
+// JavaScript identifiers are Unicode, not ASCII: `import café from 'chalk'` is
+// legal. Tokenising `é` as punctuation made the clause walk reject the whole
+// import, which then looked unreferenced - and --fix would delete it.
+const isIdentStart = (c) => /[\p{ID_Start}$_]/u.test(c);
+const isIdentPart = (c) => /[\p{ID_Continue}$\u200C\u200D]/u.test(c);
 const isDigit = (c) => c >= '0' && c <= '9';
 
 /**
@@ -241,10 +244,19 @@ export function tokenize(source, file) {
       continue;
     }
 
-    if (isIdentStart(c)) {
+    // `\u0041bc` is a legal identifier. Rare, but a missed identifier here
+    // becomes a missed import, which becomes a deleted dependency.
+    const escapedIdent = c === '\\' && source[i + 1] === 'u';
+    if (isIdentStart(c) || escapedIdent) {
       const start = here();
       let value = '';
-      while (i < source.length && isIdentPart(source[i])) {
+      while (i < source.length) {
+        if (source[i] === '\\' && source[i + 1] === 'u') {
+          value += source.slice(i, i + 6);
+          bumpN(6);
+          continue;
+        }
+        if (!isIdentPart(source[i])) break;
         value += source[i];
         bump();
       }

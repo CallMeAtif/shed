@@ -144,3 +144,48 @@ test('an empty alternative must not match everything', async (t) => {
     assert.equal(satisfies('99.0.0', '*'), true);
   });
 });
+
+test('prerelease inclusion follows node-semver', async (t) => {
+  await t.test('a prerelease does not satisfy a plain floor', () => {
+    assert.equal(satisfies('1.2.3-alpha', '>=1.0.0'), false);
+    assert.equal(satisfies('2.0.0-rc.1', '^1.0.0'), false);
+  });
+
+  await t.test('but does when a comparator pins the same tuple and is itself a prerelease', () => {
+    assert.equal(satisfies('1.2.3-alpha', '>=1.2.3-alpha'), true);
+    assert.equal(satisfies('1.2.3-beta', '>=1.2.3-alpha'), true);
+  });
+
+  await t.test('a release version is unaffected', () => {
+    assert.equal(satisfies('1.2.4', '>=1.0.0'), true);
+    assert.equal(satisfies('22.0.0', '>=18.0.0'), true);
+  });
+});
+
+test('caret below 1.0.0 matches node-semver', async (t) => {
+  await t.test('a wildcard widens rather than narrows', () => {
+    assert.equal(satisfies('0.9.0', '^0.x'), true);
+    assert.equal(satisfies('1.0.0', '^0.x'), false);
+    assert.equal(satisfies('0.9.0', '^0'), true);
+    assert.equal(satisfies('0.0.9', '^0.0.x'), true);
+    assert.equal(satisfies('0.1.0', '^0.0.x'), false);
+  });
+
+  await t.test('a specified component still pins', () => {
+    assert.equal(satisfies('0.2.9', '^0.2.3'), true);
+    assert.equal(satisfies('0.3.0', '^0.2.3'), false);
+    assert.equal(satisfies('0.0.4', '^0.0.3'), false);
+  });
+});
+
+test('a partial hyphen upper bound covers the whole component', async (t) => {
+  await t.test('1.2.3 - 2.3 admits every 2.3.x', () => {
+    assert.equal(satisfies('2.3.1', '1.2.3 - 2.3'), true);
+    assert.equal(satisfies('2.4.0', '1.2.3 - 2.3'), false);
+  });
+
+  await t.test('a full upper bound is still exact', () => {
+    assert.equal(satisfies('2.3.4', '1.2.3 - 2.3.4'), true);
+    assert.equal(satisfies('2.3.5', '1.2.3 - 2.3.4'), false);
+  });
+});

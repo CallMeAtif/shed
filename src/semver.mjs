@@ -18,9 +18,9 @@
  *   intersection     space or comma separated comparators
  *   union            ||
  *
- * Not supported, by choice: build metadata ordering (ignored, per semver spec)
- * and prerelease-inclusion subtleties (a prerelease satisfies a range only when
- * it is >= the range's lower bound, which is stricter than node-semver).
+ * Build metadata is parsed and ignored for ordering, per the spec. Prerelease
+ * inclusion follows node-semver: a prerelease satisfies a comparator set only if
+ * some comparator pins the same major.minor.patch and is itself a prerelease.
  */
 
 /** @typedef {{ major: number, minor: number, patch: number, prerelease: (string|number)[] }} Version */
@@ -127,10 +127,12 @@ function expandToken(token) {
     case '<':
       return [{ op: '<', version: base }];
     case '^':
-      // ^0.2.3 is bounded at 0.3.0 and ^0.0.3 at 0.0.4: below 1.0.0 the leftmost
-      // non-zero component is the one that must stay put.
-      if (major !== 0) return [{ op: '>=', version: base }, { op: '<', version: nextMajor(base) }];
-      if (minor !== 0 || minorWild) return [{ op: '>=', version: base }, { op: '<', version: nextMinor(base) }];
+      // Below 1.0.0 the leftmost *specified* non-zero component is the one that
+      // must stay put, and a wildcard widens the bound rather than narrowing it:
+      // ^0.x is <1.0.0, ^0.0.x is <0.1.0, ^0.2.3 is <0.3.0, ^0.0.3 is <0.0.4.
+      if (major !== 0 || minorWild) return [{ op: '>=', version: base }, { op: '<', version: nextMajor(base) }];
+      if (patchWild) return [{ op: '>=', version: base }, { op: '<', version: nextMinor(base) }];
+      if (minor !== 0) return [{ op: '>=', version: base }, { op: '<', version: nextMinor(base) }];
       return [{ op: '>=', version: base }, { op: '<', version: { major: 0, minor: 0, patch: patch + 1, prerelease: [] } }];
     case '~':
       return minorWild
@@ -168,7 +170,12 @@ export function parseRange(range) {
     const hyphen = /^\s*(\S+)\s+-\s+(\S+)\s*$/.exec(alt);
     if (hyphen) {
       const lower = expandToken(`>=${hyphen[1]}`);
-      const upper = expandToken(`<=${hyphen[2]}`);
+      // A partial upper bound covers the whole component it omits: "1.2.3 - 2.3"
+      // ends below 2.4.0, not at 2.3.0.
+      const parts = hyphen[2].replace(/^v/, '').split('.');
+      const upper = parts.length >= 3
+        ? expandToken(`<=${hyphen[2]}`)
+        : expandToken(`<${parts.length === 1 ? `${Number(parts[0]) + 1}.0.0` : `${parts[0]}.${Number(parts[1]) + 1}.0`}`);
       if (!lower || !upper) return null;
       alternatives.push([...lower, ...upper]);
       continue;
@@ -195,8 +202,20 @@ export function satisfies(version, range) {
   const alternatives = parseRange(range);
   if (!target || !alternatives) return false;
 
-  return alternatives.some((comparators) =>
-    comparators.every(({ op, version: bound }) => {
+  return alternatives.some((comparators) => {
+    // node-semver's rule: a prerelease only satisfies a set when some comparator
+    // pins the same [major, minor, patch] and is itself a prerelease. Otherwise
+    // 1.2.3-alpha would satisfy ">=1.0.0", which is not what anyone means by a
+    // version floor.
+    if (target.prerelease.length > 0) {
+      const tupleMatch = comparators.some(({ version: bound }) =>
+        bound.prerelease.length > 0
+        && bound.major === target.major
+        && bound.minor === target.minor
+        && bound.patch === target.patch);
+      if (!tupleMatch) return false;
+    }
+    return comparators.every(({ op, version: bound }) => {
       const cmp = compare(target, bound);
       switch (op) {
         case '>=': return cmp >= 0;
@@ -205,8 +224,8 @@ export function satisfies(version, range) {
         case '<': return cmp < 0;
         default: return cmp === 0;
       }
-    }),
-  );
+    });
+  });
 }
 
 /**
