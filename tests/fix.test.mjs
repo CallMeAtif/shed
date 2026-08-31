@@ -104,9 +104,23 @@ test('planFix decides what may be touched', async (t) => {
 
 test('--fix end to end', async (t) => {
   /** @param {object} manifest @param {Record<string,string>} files */
+  /**
+   * --fix requires a lockfile (peer requirements are invisible without one), so
+   * every fixture gets a minimal one derived from its manifest.
+   */
   const project = (manifest, files) => {
     const dir = mkdtempSync(join(tmpdir(), 'shed-fix-'));
     writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    if (!files['package-lock.json']) {
+      const names = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+      writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          '': { dependencies: manifest.dependencies ?? {}, devDependencies: manifest.devDependencies ?? {} },
+          ...Object.fromEntries(names.map((n) => [`node_modules/${n}`, { version: '1.0.0' }])),
+        },
+      }, null, 2));
+    }
     for (const [path, content] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
@@ -189,9 +203,23 @@ test('--fix end to end', async (t) => {
 });
 
 test('--fix refuses when the scan could not account for every file', async (t) => {
+  /**
+   * --fix requires a lockfile (peer requirements are invisible without one), so
+   * every fixture gets a minimal one derived from its manifest.
+   */
   const project = (manifest, files) => {
     const dir = mkdtempSync(join(tmpdir(), 'shed-blk-'));
     writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    if (!files['package-lock.json']) {
+      const names = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+      writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          '': { dependencies: manifest.dependencies ?? {}, devDependencies: manifest.devDependencies ?? {} },
+          ...Object.fromEntries(names.map((n) => [`node_modules/${n}`, { version: '1.0.0' }])),
+        },
+      }, null, 2));
+    }
     for (const [path, content] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
@@ -218,12 +246,38 @@ test('--fix refuses when the scan could not account for every file', async (t) =
     rmSync(dir, { recursive: true, force: true });
   });
 
-  await t.test('a JSX file blocks the edit, because JSX text is not tokenised', () => {
-    const dir = project(manifest, { 'src/a.jsx': "const A = () => <p>it's {require('chalk')} fine</p>;\n" });
+  await t.test('an import hidden by JSX text is vetoed rather than deleted', () => {
+    // The strict scanner cannot see this require: the apostrophes in "it's" and
+    // "isn't" close a string around it. The permissive second opinion can, and
+    // that disagreement is enough to refuse.
+    const dir = project(manifest, {
+      'src/a.jsx': "const A = () => <p>it's {require('chalk').red('x')} isn't</p>;\nexport default A;\n",
+    });
+    const { code, stdout } = run([dir, '--fix']);
+    assert.equal(code, 0);
+    assert.match(stdout, /Nothing removed\. 1 package/);
+    assert.match(stdout, /too close to call: chalk/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).dependencies.chalk, '^5.0.0');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a manifest with no source files at all is never emptied', () => {
+    const dir = project(manifest, {});
     const { code, stderr } = run([dir, '--fix']);
     assert.equal(code, 2);
-    assert.match(stderr, /JSX/);
+    assert.match(stderr, /no source files were scanned/);
     assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).dependencies.chalk, '^5.0.0');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('a project with no lockfile is not edited, because peers are invisible', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shed-nolock-'));
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    writeFileSync(join(dir, 'src/a.js'), 'export default 1;\n');
+    const { code, stderr } = run([dir, '--fix']);
+    assert.equal(code, 2);
+    assert.match(stderr, /package-lock\.json/);
     rmSync(dir, { recursive: true, force: true });
   });
 });

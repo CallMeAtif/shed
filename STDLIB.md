@@ -83,8 +83,8 @@ renders two columns wide — a rule you only find by having the test fail.
 
 `styleText` (v20.12, stable v22.17) emits the escape codes. What a colour package
 really sells is the *decision* of whether to colour at all, so that is what this
-module owns: `NO_COLOR` wins over everything, then `FORCE_COLOR`, then TTY
-detection with `TERM=dumb` excluded. When colour is off every style is the
+module owns: `NO_COLOR` wins over everything including an explicit `--color`,
+then the flag, then `FORCE_COLOR`, then TTY detection with `TERM=dumb` excluded. When colour is off every style is the
 identity function, so no call site branches on it.
 
 **The gotcha that cost an hour.** `styleText` validates the target stream by
@@ -117,7 +117,7 @@ works".
 
 ### 7. `mocha` / `jest` / `vitest` → `node:test` + `node:assert/strict`
 
-233 tests, no runner installed. Nested `t.test()` subtests give the same
+235 tests, no runner installed. Nested `t.test()` subtests give the same
 structure `describe`/`it` would. The one thing genuinely missing versus Jest is
 module mocking, which this codebase does not need — every module takes its
 dependencies as parameters, and `main()` takes its IO as an argument specifically

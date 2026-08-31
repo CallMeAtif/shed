@@ -86,7 +86,7 @@ export function declaredDependencies(pkg) {
  *
  * @param {object} pkg
  * @param {string} [override] value of --node
- * @returns {{ version: string, source: 'flag'|'engines'|'runtime' }}
+ * @returns {{ version: string, source: 'flag'|'engines'|'runtime'|'unreadable-engines', declared?: string }}
  */
 export function resolveNodeFloor(pkg, override) {
   if (override) {
@@ -97,6 +97,10 @@ export function resolveNodeFloor(pkg, override) {
   if (typeof declared === 'string') {
     const floor = lowerBound(declared);
     if (floor) return { version: floor, source: 'engines' };
+    // The project declared a floor and shed could not read it. Falling back to
+    // the running Node is almost always *upward*, which turns "needs a bump"
+    // into "removable" - so this says so out loud rather than quietly guessing.
+    return { version: process.version.replace(/^v/, ''), source: 'unreadable-engines', declared };
   }
   return { version: process.version.replace(/^v/, ''), source: 'runtime' };
 }
@@ -306,9 +310,10 @@ export function loadConfigText(dir, pkg) {
  *
  * @param {string} dir
  * @param {string[]} files repository-relative source paths already collected
+ * @param {string[]} [declared] declared dependency names, matched against root filenames
  * @returns {Set<string>}
  */
-export function impliedTooling(dir, files) {
+export function impliedTooling(dir, files, declared = []) {
   /** @type {Set<string>} */
   const implied = new Set();
 
@@ -341,6 +346,16 @@ export function impliedTooling(dir, files) {
 
     const rc = /^\.([a-z][a-z0-9-]*)rc(?:\.[a-z]+)?$/i.exec(name);
     if (rc) add(rc[1].toLowerCase());
+  }
+
+  // A root file named after a declared dependency is that dependency's config,
+  // whatever extension it uses - nodemon.json, jest.config.ts, .babelrc.cjs.
+  // Matching against declared names rather than any filename keeps this bounded.
+  for (const name of declared) {
+    const base = name.startsWith('@') ? name.split('/')[1] : name;
+    if (!base) continue;
+    const pattern = new RegExp(`^\\.?${base.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}(rc)?(\\.|$)`, 'i');
+    if (entries.some((entry) => pattern.test(entry))) implied.add(name);
   }
 
   // TypeScript is required by anything that compiles TypeScript, and is named by

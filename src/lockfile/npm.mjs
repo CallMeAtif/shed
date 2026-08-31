@@ -68,7 +68,10 @@ export function parseNpmLock(text) {
       // Peers are NOT dependency edges - the consumer installs them - but they
       // are the reason a package like react-dom sits in a manifest that never
       // imports it. Kept separate so reachability stays correct.
-      peers: Object.keys(entry.peerDependencies ?? {}),
+      // An optional peer is one the consumer may legitimately not install, so it
+      // must not shield a package from being reported as dead weight.
+      peers: Object.keys(entry.peerDependencies ?? {})
+        .filter((peer) => entry.peerDependenciesMeta?.[peer]?.optional !== true),
     });
   }
 

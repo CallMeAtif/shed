@@ -132,7 +132,10 @@ export const ENTRIES = [
     since: '18.0.0',
     confidence: 'partial',
     rationale: 'fetch covers requests and responses; interceptors, automatic JSON and progress events are not in the box.',
-    caveats: ['interceptors', 'axios.create', 'onUploadProgress', 'onDownloadProgress'],
+    caveats: [
+      'interceptors', 'axios.create', 'onUploadProgress', 'onDownloadProgress',
+      'timeout:', 'validateStatus', 'maxRedirects', 'responseType', 'withCredentials',
+    ],
   },
   {
     pkg: 'uuid',

@@ -123,6 +123,12 @@ export function parse(argv) {
     }
   }
 
+  // A --node value that is not a version silently made every comparison succeed,
+  // which failed toward "removable". Reject it at the door instead.
+  if (flags.node !== undefined && !/^v?\d+(\.\d+)*(-[0-9A-Za-z.-]+)?$/.test(String(flags.node))) {
+    throw new UsageError(`--node must be a version like 22.17.0, got ${JSON.stringify(flags.node)}`);
+  }
+
   const positionals = [...parsed.positionals];
   const command = positionals[0] in COMMANDS ? positionals.shift() : DEFAULT_COMMAND;
   return { command, positionals, flags };

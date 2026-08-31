@@ -12,7 +12,7 @@ import { parse, helpText } from './cli.mjs';
 import { colorEnabled, createPainter } from './render/ansi.mjs';
 import { analyze, humanCount, VERDICT_ORDER } from './analyze.mjs';
 import { renderText, toJSON } from './report.mjs';
-import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText, impliedTooling, looksBrowserTargeted } from './project.mjs';
+import { loadManifest, resolveNodeFloor, walkSource, loadIgnore, loadLockfile, loadConfigText, impliedTooling, looksBrowserTargeted, declaredDependencies } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
 import { planFix, removeDependencies } from './fix.mjs';
@@ -56,7 +56,14 @@ export function main(argv, io) {
   }
 
   const { command, positionals, flags } = parsed;
-  const painter = createPainter(flags.color ?? colorEnabled({ isTTY: io.columns > 0 }));
+  // NO_COLOR wins over everything, including an explicit --color: the point of
+  // the convention is that a user who sets it never has to audit every tool's
+  // flags. Otherwise the flag decides, and only then the environment and TTY.
+  const painter = createPainter(
+    process.env.NO_COLOR !== undefined
+      ? false
+      : flags.color ?? colorEnabled({ isTTY: io.columns > 0 }),
+  );
 
   if (flags.help || command === 'help') {
     io.stdout(helpText(VERSION));
@@ -100,7 +107,7 @@ function runScan(positionals, painter, io, flags) {
   const walk = walkSource(dir, loadIgnore(dir, Ignore));
   const floor = resolveNodeFloor(pkg, flags.node);
 
-  const { lock } = loadLockfile(dir, parseNpmLock);
+  const { lock, reason: lockReason } = loadLockfile(dir, parseNpmLock);
   const analysis = analyze({
     dir,
     pkg,
@@ -110,7 +117,7 @@ function runScan(positionals, painter, io, flags) {
     configText: loadConfigText(dir, pkg),
     peers: new Set([
       ...(lock ? peerRequirements(lock) : []),
-      ...impliedTooling(dir, walk.files),
+      ...impliedTooling(dir, walk.files, [...declaredDependencies(pkg).keys()]),
     ]),
   });
   const report = {
@@ -119,12 +126,17 @@ function runScan(positionals, painter, io, flags) {
     node: floor,
     ...analysis,
     impact: measureImpact(lock, analysis.findings),
-    blockers: scanBlockers(walk, analysis),
+    blockers: [
+      ...scanBlockers(walk, analysis),
+      // Without a lockfile shed cannot see peer requirements, and a peer is the
+      // classic dependency that nothing imports and everything needs.
+      ...(lock ? [] : [`no readable package-lock.json${lockReason ? ` (${lockReason})` : ''}, so peer requirements are invisible`]),
+    ],
     nested: walk.nested,
     browserTargeted: looksBrowserTargeted(dir, pkg),
   };
 
-  if (flags.fix) return applyFix(report, manifestPath, painter, io);
+  if (flags.fix) return applyFix(report, manifestPath, painter, io, Boolean(flags.json));
 
   if (flags.json) {
     io.stdout(JSON.stringify(toJSON(report), null, 2));
@@ -202,12 +214,11 @@ function scanBlockers(walk, analysis) {
   if (walk.skipped.length > 0) {
     blockers.push(`${walk.skipped.length} file(s) were skipped and never read`);
   }
-  const jsx = walk.files.filter((file) => file.endsWith('.jsx') || file.endsWith('.tsx'));
-  if (jsx.length > 0) {
-    blockers.push(
-      `${jsx.length} JSX file(s) were scanned, and shed does not tokenise JSX text, ` +
-      'so an import inside a JSX expression can be missed',
-    );
+  // A JSX file no longer blocks outright: the permissive second-opinion scan
+  // vetoes any individual package whose name it sees, which is the precise
+  // version of what the blanket ban was approximating.
+  if (walk.files.length === 0) {
+    blockers.push('no source files were scanned at all, so there is no evidence for any verdict');
   }
   return blockers;
 }
@@ -216,16 +227,21 @@ function scanBlockers(walk, analysis) {
  * Remove dependencies nothing imports, then report exactly what changed.
  * @returns {number} 0 on success or a clean no-op, 2 when shed refuses to edit
  */
-function applyFix(report, manifestPath, painter, io) {
+function applyFix(report, manifestPath, painter, io, json = false) {
   const c = painter;
   const { targets, refusal } = planFix(report.findings, report.errors.length, report.blockers);
 
   if (refusal) {
-    io.stderr(`shed: ${refusal}`);
+    if (json) io.stdout(JSON.stringify({ removed: [], refused: refusal }, null, 2));
+    else io.stderr(`shed: ${refusal}`);
     return 2;
   }
   if (targets.length === 0) {
-    io.stdout('Nothing to remove: every declared dependency is imported somewhere, or is run by a script.');
+    const vetoed = report.findings.filter((f) => f.unconfirmed).map((f) => f.name);
+    io.stdout(vetoed.length > 0
+      ? `Nothing removed. ${vetoed.length} package(s) had no import shed could confirm, but a `
+        + `permissive scan saw the name and that is too close to call: ${vetoed.join(', ')}.`
+      : 'Nothing to remove: every declared dependency is imported, run by a script, or required as a peer.');
     return 0;
   }
 
@@ -238,6 +254,11 @@ function applyFix(report, manifestPath, painter, io) {
   }
 
   writeFileSync(manifestPath, result.text);
+
+  if (json) {
+    io.stdout(JSON.stringify({ removed: result.removed, skipped: result.skipped }, null, 2));
+    return 0;
+  }
 
   const noun = result.removed.length === 1 ? 'dependency' : 'dependencies';
   const lines = result.removed.length === 0

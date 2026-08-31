@@ -10,8 +10,8 @@
  *
  * Three guards stand between a finding and an edit:
  *
- *   1. only the `unreferenced` verdict qualifies - never `tooling`, which is the
- *      dependency a package script invokes by name
+ *   1. only the `unreferenced` verdict qualifies - never `tooling`, and never one
+ *      a permissive second-opinion scan disagreed about
  *   2. the whole scan must have accounted for every file. A parse error, a file
  *      skipped for size, or a JSX file whose text shed cannot tokenise all mean
  *      an import could be hiding where nobody looked - and an unexamined file is
@@ -134,7 +134,7 @@ export function planFix(findings, parseErrors, blockers = []) {
   }
   return {
     targets: findings
-      .filter((f) => f.verdict === 'unreferenced')
+      .filter((f) => f.verdict === 'unreferenced' && !f.unconfirmed)
       .map((f) => ({ name: f.name, field: f.field })),
     refusal: null,
   };

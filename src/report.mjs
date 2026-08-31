@@ -35,7 +35,12 @@ export function renderText(report, { painter, all = false, quiet = false, width 
   const out = [];
 
   const name = report.project.name ?? '(unnamed project)';
-  const floorNote = { flag: 'from --node', engines: 'from engines.node', runtime: 'assumed from the running Node' };
+  const floorNote = {
+    flag: 'from --node',
+    engines: 'from engines.node',
+    runtime: 'assumed from the running Node',
+    'unreadable-engines': 'engines.node could not be read - assumed from the running Node',
+  };
   out.push(
     `${c.bold('shed')} ${c.dim(report.version)}  ${c.dim('·')}  ${c.bold(name)}  ${c.dim('·')}  ` +
     `Node floor ${c.cyan(report.node.version)} ${c.dim(`(${floorNote[report.node.source]})`)}`,
@@ -43,6 +48,10 @@ export function renderText(report, { painter, all = false, quiet = false, width 
   const fileNoun = report.scanned === 1 ? 'file' : 'files';
   const depNoun = report.totals.declared === 1 ? 'dependency' : 'dependencies';
   out.push(c.dim(`scanned ${report.scanned} ${fileNoun}, ${report.totals.declared} declared ${depNoun}`));
+
+  if (report.node.source === 'unreadable-engines') {
+    out.push(c.boldYellow(`  could not parse engines.node (${report.node.declared}); version verdicts below may be too generous`));
+  }
 
   if (report.browserTargeted) {
     out.push(c.dim('  this looks like a browser bundle; shed judges Node versions only, and a stdlib'));

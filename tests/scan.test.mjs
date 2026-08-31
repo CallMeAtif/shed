@@ -17,6 +17,18 @@ import { main } from '../src/main.mjs';
 function makeProject(manifest, files) {
   const dir = mkdtempSync(join(tmpdir(), 'shed-test-'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2));
+  // --fix requires a lockfile, since peer requirements are invisible without
+  // one. Fixtures that supply their own take precedence.
+  if (!files['package-lock.json']) {
+    const names = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+    writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { dependencies: manifest.dependencies ?? {}, devDependencies: manifest.devDependencies ?? {} },
+        ...Object.fromEntries(names.map((n) => [`node_modules/${n}`, { version: '1.0.0' }])),
+      },
+    }, null, 2));
+  }
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), content);

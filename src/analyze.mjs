@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { extractImports, packageNameFromSpecifier } from './scanner/imports.mjs';
+import { extractImports, packageNameFromSpecifier, looseReferences } from './scanner/imports.mjs';
 import { declaredDependencies } from './project.mjs';
 import { lookup } from './knowledge.mjs';
 import { gte } from './semver.mjs';
@@ -147,6 +147,7 @@ function namedInConfig(configText, name) {
  * @property {number} caveatCount
  * @property {string} because      one line explaining this verdict
  * @property {string[]} scripts    package scripts that invoke it by name
+ * @property {boolean} unconfirmed a loose scan saw this name where the strict one did not
  */
 
 /**
@@ -169,6 +170,9 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
   const caveatHits = new Map();
   /** @type {import('./errors.mjs').Diagnostic[]} */
   const errors = [];
+  /** Names a permissive scan saw, whether or not the strict one confirmed them. */
+  /** @type {Set<string>} */
+  const loose = new Set();
   let scanned = 0;
 
   for (const file of files) {
@@ -182,6 +186,7 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
 
     const found = extractImports(text, file);
     errors.push(...found.errors);
+    for (const name of looseReferences(text)) loose.add(name);
 
     /** @type {Set<string>} */
     const inThisFile = new Set();
@@ -238,9 +243,11 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       }
     } else if (found.length === 0) {
       verdict = 'unreferenced';
-      because = entry
-        ? 'nothing imports it; if that is right, deleting it needs no replacement at all'
-        : 'nothing imports it in the files shed scanned';
+      because = loose.has(name)
+        ? 'no import shed can confirm, but a permissive scan saw the name - too close to call, so --fix will not touch it'
+        : entry
+          ? 'nothing imports it; if that is right, deleting it needs no replacement at all'
+          : 'nothing imports it in the files shed scanned';
     } else if (!entry) {
       verdict = 'unknown';
       because = 'not in the knowledge base - shed has no opinion either way';
@@ -268,6 +275,9 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       caveatCount: hits.length,
       because,
       scripts,
+      // A permissive scan disagreeing with the strict one is enough to block a
+      // deletion, though not enough to claim the package is used.
+      unconfirmed: found.length === 0 && loose.has(name),
     });
   }
 

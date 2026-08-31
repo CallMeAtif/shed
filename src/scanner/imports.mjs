@@ -432,3 +432,30 @@ export function packageNameFromSpecifier(specifier) {
   }
   return parts[0] || null;
 }
+
+/**
+ * A deliberately permissive second opinion, used only to VETO a deletion.
+ *
+ * The strict scanner is string- and comment-aware, which is right for reporting
+ * and wrong for safety in one case: JSX text is not tokenised, so an even number
+ * of apostrophes on a line can close a "string" around a real `require()` and
+ * swallow it silently, with no diagnostic. This scan ignores all context and
+ * matches anything that looks like a specifier.
+ *
+ * It is never used to claim a package IS used, only to refuse to claim it is
+ * not. False positives here cost a dependency staying in a manifest; false
+ * negatives in the strict scanner cost a broken build.
+ *
+ * @param {string} source
+ * @returns {Set<string>} package names, loosely
+ */
+export function looseReferences(source) {
+  /** @type {Set<string>} */
+  const names = new Set();
+  const pattern = /(?:\bfrom|\brequire\s*\(|\bimport\s*\(|\bimport)\s*['"`]([^'"`\n]+)['"`]/g;
+  for (const match of source.matchAll(pattern)) {
+    const name = packageNameFromSpecifier(match[1]);
+    if (name) names.add(name);
+  }
+  return names;
+}
