@@ -12,6 +12,7 @@ const SECTIONS = {
   bump: { title: 'NEEDS A NODE BUMP', tone: 'boldYellow', lead: 'the replacement exists above this project\'s floor' },
   blocked: { title: 'BLOCKED', tone: 'boldRed', lead: 'the code uses something the replacement does not cover' },
   unreferenced: { title: 'UNREFERENCED', tone: 'dim', lead: 'declared, but nothing imports it' },
+  tooling: { title: 'TOOLING', tone: 'dim', lead: 'never imported, but a package script runs it' },
   unknown: { title: 'NO MAPPING', tone: 'dim', lead: 'not in the knowledge base' },
 };
 
@@ -130,6 +131,7 @@ export function toJSON(report) {
       siteCount: f.siteCount,
       caveats: f.caveats,
       caveatCount: f.caveatCount,
+      scripts: f.scripts,
     })),
     errors: report.errors.map((e) => ({
       file: e.pos.file, line: e.pos.line, col: e.pos.col, message: e.message,

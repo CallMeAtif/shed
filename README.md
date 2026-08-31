@@ -230,10 +230,10 @@ same toolchain are byte-identical:
 
 ```
 $ make build && sha256sum dist/shed.mjs
-feebf12c7ff9663a1a87728bad40d0cf1ebae52eef65957b5c2a723097164446  dist/shed.mjs
+b766016f0e5b50b9f2b1f9eac026ea812eb6f66ee572f945f2c81d3bfcf276c6  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-feebf12c7ff9663a1a87728bad40d0cf1ebae52eef65957b5c2a723097164446  dist/shed.mjs
+b766016f0e5b50b9f2b1f9eac026ea812eb6f66ee572f945f2c81d3bfcf276c6  dist/shed.mjs
 ```
 
 ---

@@ -5,7 +5,7 @@
  * tested without touching a filesystem, and from the commands themselves so that
  * each one is a plain function of its inputs.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Diagnostic, UsageError } from './errors.mjs';
 import { parse, helpText } from './cli.mjs';
@@ -15,6 +15,7 @@ import { renderText, toJSON } from './report.mjs';
 import { loadManifest, resolveNodeFloor, walkSource, loadIgnore } from './project.mjs';
 import { Ignore } from './gitignore.mjs';
 import { ENTRIES, lookup } from './knowledge.mjs';
+import { planFix, removeDependencies } from './fix.mjs';
 
 /**
  * Replaced with a literal by tools/bundle.mjs, so the built artifact carries its
@@ -93,7 +94,7 @@ export function main(argv, io) {
  */
 function runScan(positionals, painter, io, flags) {
   const dir = resolve(positionals[0] ?? '.');
-  const { pkg } = loadManifest(dir);
+  const { pkg, path: manifestPath } = loadManifest(dir);
   const ignore = new Set(flags.ignore ?? []);
   const walk = walkSource(dir, loadIgnore(dir, Ignore));
   const floor = resolveNodeFloor(pkg, flags.node);
@@ -105,6 +106,8 @@ function runScan(positionals, painter, io, flags) {
     node: floor,
     ...analysis,
   };
+
+  if (flags.fix) return applyFix(report, manifestPath, painter, io);
 
   if (flags.json) {
     io.stdout(JSON.stringify(toJSON(report), null, 2));
@@ -118,6 +121,41 @@ function runScan(positionals, painter, io, flags) {
   }
 
   return analysis.totals.byVerdict.removable > 0 ? 1 : 0;
+}
+
+/**
+ * Remove dependencies nothing imports, then report exactly what changed.
+ * @returns {number} 0 on success or a clean no-op, 2 when shed refuses to edit
+ */
+function applyFix(report, manifestPath, painter, io) {
+  const c = painter;
+  const { targets, refusal } = planFix(report.findings, report.errors.length);
+
+  if (refusal) {
+    io.stderr(`shed: ${refusal}`);
+    return 2;
+  }
+  if (targets.length === 0) {
+    io.stdout('Nothing to remove: every declared dependency is imported somewhere, or is run by a script.');
+    return 0;
+  }
+
+  let result;
+  try {
+    result = removeDependencies(readFileSync(manifestPath, 'utf8'), targets);
+  } catch (err) {
+    io.stderr(`shed: ${/** @type {Error} */ (err).message}`);
+    return 2;
+  }
+
+  writeFileSync(manifestPath, result.text);
+
+  const lines = [c.boldGreen(`Removed ${result.removed.length} unreferenced dependencies from package.json:`)];
+  for (const name of result.removed) lines.push(`  - ${name}`);
+  for (const { name, reason } of result.skipped) lines.push(`  ${c.yellow('!')} ${name}: ${reason}`);
+  lines.push('', c.dim('Nothing else was touched. Run your tests, then delete the lockfile entries with your package manager.'));
+  io.stdout(lines.join('\n'));
+  return 0;
 }
 
 /** Explain one package in full, whether or not the project uses it. */

@@ -35,7 +35,7 @@ export const OPTIONS = {
     type: 'boolean',
     default: false,
     placeholder: '',
-    help: 'Rewrite source for the mechanically safe swaps only',
+    help: 'Remove dependencies nothing imports from package.json',
   },
   node: {
     type: 'string',

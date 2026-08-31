@@ -21,11 +21,12 @@ import { gte } from './semver.mjs';
  * bump         - the replacement exists but above the project's declared floor
  * blocked      - the code uses something the stdlib replacement does not cover
  * unreferenced - declared but never imported anywhere shed looked
+ * tooling      - never imported, but a package script invokes it by name
  * unknown      - no mapping in the knowledge base; shed has no opinion
  */
 
 /** Report order: most actionable first. */
-export const VERDICT_ORDER = ['removable', 'bump', 'blocked', 'unreferenced', 'unknown'];
+export const VERDICT_ORDER = ['removable', 'bump', 'blocked', 'unreferenced', 'tooling', 'unknown'];
 
 /** Verdicts shown without --all. */
 export const DEFAULT_VERDICTS = new Set(['removable', 'bump', 'blocked']);
@@ -64,6 +65,27 @@ function probeCaveats(text, file, caveats) {
 }
 
 /**
+ * Package scripts that invoke a dependency by name.
+ *
+ * Without this, every CLI-shaped dev dependency - nodemon, typescript, eslint -
+ * looks unreferenced, because nothing imports it. Recommending their removal
+ * would break the project, which is the classic false positive of this genre of
+ * tool. Matching is on a word boundary so `ts-node` does not match `ts-node-dev`.
+ *
+ * @param {object} pkg
+ * @param {string} name
+ * @returns {string[]} the script names that mention it
+ */
+function scriptsUsing(pkg, name) {
+  const scripts = pkg?.scripts;
+  if (!scripts || typeof scripts !== 'object') return [];
+  const pattern = new RegExp(`(^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}([\\s"'/]|$)`);
+  return Object.entries(scripts)
+    .filter(([, command]) => typeof command === 'string' && pattern.test(command))
+    .map(([script]) => script);
+}
+
+/**
  * @typedef {object} Finding
  * @property {string} name
  * @property {string} range        the version range the manifest declares
@@ -75,6 +97,7 @@ function probeCaveats(text, file, caveats) {
  * @property {CaveatHit[]} caveats capped
  * @property {number} caveatCount
  * @property {string} because      one line explaining this verdict
+ * @property {string[]} scripts    package scripts that invoke it by name
  */
 
 /**
@@ -142,15 +165,20 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set() }) {
     const found = sites.get(name) ?? [];
     const hits = caveatHits.get(name) ?? [];
 
+    const scripts = scriptsUsing(pkg, name);
+
     /** @type {Verdict} */
     let verdict;
     let because;
 
-    if (found.length === 0) {
+    if (found.length === 0 && scripts.length > 0) {
+      verdict = 'tooling';
+      because = `nothing imports it, but ${scripts.map((s) => `scripts.${s}`).join(' and ')} runs it`;
+    } else if (found.length === 0) {
       verdict = 'unreferenced';
       because = entry
-        ? `nothing imports it; if that is right, deleting it needs no replacement at all`
-        : `nothing imports it in the files shed scanned`;
+        ? 'nothing imports it; if that is right, deleting it needs no replacement at all'
+        : 'nothing imports it in the files shed scanned';
     } else if (!entry) {
       verdict = 'unknown';
       because = 'not in the knowledge base - shed has no opinion either way';
@@ -177,6 +205,7 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set() }) {
       caveats: hits.slice(0, MAX_EVIDENCE),
       caveatCount: hits.length,
       because,
+      scripts,
     });
   }
 
