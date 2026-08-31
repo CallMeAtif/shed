@@ -319,7 +319,7 @@ const CLAUSE_PUNCT = new Set(['{', '}', ',', '*']);
  *
  * @param {string} source
  * @param {string} file
- * @returns {{ imports: FoundImport[], errors: Diagnostic[], comments: [number, number][] }}
+ * @returns {{ imports: FoundImport[], errors: Diagnostic[], comments: [number, number][], strings: string[] }}
  */
 export function extractImports(source, file) {
   const { tokens, errors, comments } = tokenize(source, file);
@@ -435,7 +435,11 @@ export function extractImports(source, file) {
     }
   }
 
-  return { imports, errors, comments };
+  // Every string literal in the file. A package can be named at runtime rather
+  // than imported - `pino({ transport: { target: 'pino-pretty' } })` - and an
+  // import-based scan is blind to it. Used only to veto a deletion.
+  const strings = [...new Set(tokens.filter((t) => t.type === 'string').map((t) => t.value))];
+  return { imports, errors, comments, strings };
 }
 
 /**

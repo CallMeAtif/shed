@@ -166,7 +166,8 @@ present, `shed` reads it, builds the resolution graph, and computes the
 transitive closure that becomes unreachable if the removable packages go:
 
 ```
-Removing them takes 23 packages out of node_modules, 1 of which runs an
+Removing them takes 6 packages out of node_modules.
+The 3 unreferenced packages would take a further 17 packages, 1 of which runs an
 install script (bcrypt).
 ```
 
@@ -339,10 +340,10 @@ produce the same bytes.
 
 ```
 $ make build && sha256sum dist/shed.mjs
-4d07af089d76488b3b75dd054c63226ef44f552e0a0b34785e1524e59d4687a8  dist/shed.mjs
+c41442da53579e06b5570672cc271c2a8427cd9d6a64be818bfdf392d23080d9  dist/shed.mjs
 
 $ rm -rf dist && make build && sha256sum dist/shed.mjs
-4d07af089d76488b3b75dd054c63226ef44f552e0a0b34785e1524e59d4687a8  dist/shed.mjs
+c41442da53579e06b5570672cc271c2a8427cd9d6a64be818bfdf392d23080d9  dist/shed.mjs
 ```
 
 ---
@@ -418,6 +419,15 @@ counts. Reading those formats is not implemented.
 parsed, `shed` falls back to the running Node — usually a *higher* version — and
 says so in the header, because that turns "needs a bump" into "removable".
 
+**Escape sequences inside a module specifier are not decoded.** `'ch\u0061lk'`
+reads as a different package name, so the real dependency gets no import site.
+Legal, and vanishingly rare in real source; decoding it would mean touching the
+string reader every specifier depends on.
+
+**A `.gitignore` re-include under an excluded directory is honoured more
+permissively than git honours it.** git will not re-include a file whose parent
+directory is excluded; `shed` will.
+
 **Phantom dependencies are not reported.** A package imported but *not* declared
 in the manifest is invisible to `shed` today.
 
@@ -444,7 +454,7 @@ M-series laptop, which was enough to stop optimising.
 ## Tests
 
 ```bash
-make test      # 257 tests, node:test only
+make test      # 265 tests, node:test only
 ```
 
 The scanner's fixture corpus is the part worth reading:

@@ -53,11 +53,18 @@ const MAX_EVIDENCE = 8;
  * @returns {CaveatHit[]}
  */
 function probeCaveats(text, file, caveats, comments) {
+  // In a JSX file the tokenizer's comment ranges are not trustworthy: a URL in
+  // JSX text ("see http://x.com") reads as a line comment and blanks the rest of
+  // the line, which hid a real caveat and produced a false "removable". Matching
+  // the raw text there is the conservative direction.
+  const trustComments = !/\.[jt]sx$/.test(file);
   // Replacing comment bytes with spaces keeps every offset, line and column
   // identical, so positions stay truthful without a second pass.
   let code = text;
-  for (const [start, end] of comments) {
-    code = code.slice(0, start) + ' '.repeat(end - start) + code.slice(end);
+  if (trustComments) {
+    for (const [start, end] of comments) {
+      code = code.slice(0, start) + ' '.repeat(end - start) + code.slice(end);
+    }
   }
 
   /** @type {CaveatHit[]} */
@@ -81,6 +88,18 @@ function probeCaveats(text, file, caveats, comments) {
 }
 
 /**
+ * Escape a package name for use inside a regular expression.
+ *
+ * Written once because it was written twice, and one of the two copies had a
+ * character class that closed early - so `socket.io` matched `socketxio`.
+ *
+ * @param {string} name
+ */
+function escapeForRegExp(name) {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Package scripts that invoke a dependency by name.
  *
  * Without this, every CLI-shaped dev dependency - nodemon, typescript, eslint -
@@ -95,7 +114,7 @@ function probeCaveats(text, file, caveats, comments) {
 function scriptsUsing(pkg, name) {
   const scripts = pkg?.scripts;
   if (!scripts || typeof scripts !== 'object') return [];
-  const pattern = new RegExp(`(^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}([\\s"'/]|$)`);
+  const pattern = new RegExp(`(^|[\\s"'=/])${escapeForRegExp(name)}([\\s"'/]|$)`);
   return Object.entries(scripts)
     .filter(([, command]) => typeof command === 'string' && pattern.test(command))
     .map(([script]) => script);
@@ -130,8 +149,7 @@ const TOOLING_BY_NAME = [
  */
 function namedInConfig(configText, name) {
   if (!configText) return false;
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|["'\\s:/=])${escaped}(["'\\s,:/]|$)`).test(configText);
+  return new RegExp(`(^|["'\\s:/=])${escapeForRegExp(name)}(["'\\s,:/]|$)`).test(configText);
 }
 
 /**
@@ -147,7 +165,7 @@ function namedInConfig(configText, name) {
  * @property {number} caveatCount
  * @property {string} because      one line explaining this verdict
  * @property {string[]} scripts    package scripts that invoke it by name
- * @property {boolean} unconfirmed a loose scan saw this name where the strict one did not
+ * @property {boolean} unconfirmed a loose scan or a string literal named it where no import did
  */
 
 /**
@@ -173,6 +191,9 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
   /** Names a permissive scan saw, whether or not the strict one confirmed them. */
   /** @type {Set<string>} */
   const loose = new Set();
+  /** Every string literal in the source, for packages named rather than imported. */
+  /** @type {Set<string>} */
+  const literals = new Set();
   let scanned = 0;
 
   for (const file of files) {
@@ -187,6 +208,7 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
     const found = extractImports(text, file);
     errors.push(...found.errors);
     for (const name of looseReferences(text)) loose.add(name);
+    for (const literal of found.strings) literals.add(literal);
 
     /** @type {Set<string>} */
     const inThisFile = new Set();
@@ -243,7 +265,9 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       }
     } else if (found.length === 0) {
       verdict = 'unreferenced';
-      because = loose.has(name)
+      because = literals.has(name)
+        ? 'nothing imports it, but its name appears as a string in the source - it may be loaded by name at runtime'
+        : loose.has(name)
         ? 'no import shed can confirm, but a permissive scan saw the name - too close to call, so --fix will not touch it'
         : entry
           ? 'nothing imports it; if that is right, deleting it needs no replacement at all'
@@ -277,7 +301,7 @@ export function analyze({ dir, pkg, files, floor, ignore = new Set(), configText
       scripts,
       // A permissive scan disagreeing with the strict one is enough to block a
       // deletion, though not enough to claim the package is used.
-      unconfirmed: found.length === 0 && loose.has(name),
+      unconfirmed: found.length === 0 && (loose.has(name) || literals.has(name)),
     });
   }
 

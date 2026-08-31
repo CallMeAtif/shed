@@ -480,3 +480,71 @@ test('impact is attributed to the set it actually describes', async (t) => {
     assert.match(stdout, /would take a further 2 packages/);
   });
 });
+
+test('a dependency can be named without being imported', async (t) => {
+  await t.test('a package loaded by name at runtime is not deleted', () => {
+    const dir = makeProject(
+      { name: 'svc', engines: { node: '>=22.0.0' }, dependencies: { pino: '^9.0.0', 'pino-pretty': '^11.0.0' } },
+      { 'src/log.js': "import pino from 'pino';\nexport default pino({ transport: { target: 'pino-pretty' } });\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const finding = report(dir, ['--all']).json.findings.find((f) => f.name === 'pino-pretty');
+    assert.match(finding.because, /appears as a string/);
+    run([dir, '--fix']);
+    const after = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    assert.equal(after.dependencies['pino-pretty'], '^11.0.0', 'must survive --fix');
+  });
+
+  await t.test('a package named in a Procfile is not deleted', () => {
+    const dir = makeProject(
+      { name: 'svc', engines: { node: '>=22.0.0' }, dependencies: { nodemon: '^3.0.0' } },
+      { 'src/a.js': 'export default 1;\n', Procfile: 'web: nodemon index.js\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir, ['--all']).json.findings.find((f) => f.name === 'nodemon').verdict, 'tooling');
+  });
+
+  await t.test('but a genuinely dead package is still removed', () => {
+    const dir = makeProject(
+      { name: 'svc', engines: { node: '>=22.0.0' }, dependencies: { 'genuinely-dead': '^1.0.0' } },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.match(run([dir, '--fix']).stdout, /Removed 1 unreferenced dependency/);
+  });
+
+  await t.test('a script name that merely resembles a package does not shield it', () => {
+    // `socket.io` must not match `socketxio`: the dot has to be escaped.
+    const dir = makeProject(
+      {
+        name: 't',
+        engines: { node: '>=22.0.0' },
+        scripts: { dev: 'node socketxio' },
+        dependencies: { 'socket.io': '^4.0.0' },
+      },
+      { 'src/a.js': 'export default 1;\n' },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir, ['--all']).json.findings.find((f) => f.name === 'socket.io').verdict, 'unreferenced');
+  });
+});
+
+test('JSX text is not treated as code when probing caveats', async (t) => {
+  await t.test('a URL in JSX text does not blank a real caveat', () => {
+    const dir = makeProject(
+      { name: 't', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0' } },
+      { 'src/a.jsx': "import chalk from 'chalk';\nexport const A = () => <p>see http://x.com</p> && chalk.hex('#fff');\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir).json.findings.find((f) => f.name === 'chalk').verdict, 'blocked');
+  });
+
+  await t.test('in a plain .js file a comment is still ignored', () => {
+    const dir = makeProject(
+      { name: 't', engines: { node: '>=22.0.0' }, dependencies: { chalk: '^5.0.0' } },
+      { 'src/a.js': "import chalk from 'chalk';\n// we dropped chalk.hex( long ago\nexport default chalk.red('x');\n" },
+    );
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.equal(report(dir).json.findings.find((f) => f.name === 'chalk').verdict, 'removable');
+  });
+});

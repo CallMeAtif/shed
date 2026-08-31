@@ -223,7 +223,8 @@ export function loadLockfile(dir, parse) {
  *
  * Only non-source formats are listed: a `.eslintrc.cjs` or `vite.config.ts` is
  * already walked as source, so its imports are found the normal way. These are
- * the ones where a package name appears as a bare string in JSON or YAML.
+ * the ones where a package name appears as a bare word - in JSON, in YAML, or in
+ * a process file like `web: nodemon index.js`.
  */
 const CONFIG_FILES = [
   '.eslintrc', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
@@ -231,6 +232,7 @@ const CONFIG_FILES = [
   '.stylelintrc', '.stylelintrc.json', '.babelrc', '.babelrc.json',
   'babel.config.json', 'tsconfig.json', 'jsconfig.json', '.npmrc', '.nvmrc',
   'Dockerfile', 'docker-compose.yml', 'docker-compose.yaml',
+  'Procfile', 'Dockerfile', 'Makefile', 'Justfile', 'Rakefile', 'app.json',
   'lerna.json', 'turbo.json', 'nx.json', 'renovate.json', '.releaserc',
   '.releaserc.json', 'commitlint.config.json', '.lintstagedrc',
   '.lintstagedrc.json', '.markdownlint.json', 'netlify.toml', 'vercel.json',
