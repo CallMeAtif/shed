@@ -391,7 +391,14 @@ close to call and `--fix` will not touch it. The same veto covers a package
 named as a string literal rather than imported — `pino({ transport: { target:
 'pino-pretty' } })` — decided by the string's *position*, not its spelling. A
 string in property-value position is a name being loaded; a comparison operand
-(`if (level === 'debug')`) is not, and does not shield anything. On a 290-file React project the
+(`if (level === 'debug')`) is not, and does not shield anything.
+
+That rule covers the canonical shapes — a property value, a nested object, a
+computed or quoted key, and a string inside a property's array. It does **not**
+cover a bare call argument (`register('some-plugin')`), a bare ternary branch
+(`dev ? 'some-plugin' : undefined`), or a string more than 64 tokens deep inside
+an array literal. A dependency named only in one of those positions, and
+imported nowhere, can still be reported unreferenced. On a 290-file React project the
 strict scan produced 9 diagnostics; none affected a verdict.
 
 **Tooling detection is evidence-based, and evidence can be missing.** A package
