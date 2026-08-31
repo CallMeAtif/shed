@@ -108,3 +108,36 @@ export function truncate(input, target) {
   }
   return out + '…';
 }
+
+/**
+ * Wrap to `target` columns on word boundaries, measuring display width rather
+ * than code units so CJK and emoji do not overflow the column.
+ *
+ * A word longer than the target is emitted on its own overlong line rather than
+ * broken: file paths and API names are worse to read hyphenated than wide.
+ *
+ * @param {string} input
+ * @param {number} target
+ * @returns {string[]} one entry per line
+ */
+export function wrap(input, target) {
+  const words = input.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    if (line === '') {
+      line = word;
+      continue;
+    }
+    if (stringWidth(line) + 1 + stringWidth(word) <= target) {
+      line += ` ${word}`;
+      continue;
+    }
+    lines.push(line);
+    line = word;
+  }
+  lines.push(line);
+  return lines;
+}

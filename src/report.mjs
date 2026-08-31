@@ -4,7 +4,7 @@
  * text.
  */
 import { VERDICT_ORDER, DEFAULT_VERDICTS, humanCount } from './analyze.mjs';
-import { pad, stringWidth, truncate } from './render/width.mjs';
+import { pad, stringWidth, truncate, wrap } from './render/width.mjs';
 
 /** Section heading and accent colour for each verdict. */
 const SECTIONS = {
@@ -69,7 +69,9 @@ function renderFinding(finding, c, width) {
     `${pad(c.dim(reach), 12 + (stringWidth(c.dim(reach)) - stringWidth(reach)))}`;
 
   lines.push(finding.entry ? `${head}${c.cyan(finding.entry.api)}` : head.trimEnd());
-  lines.push(`    ${c.dim(truncate(finding.because, Math.max(40, width - 6)))}`);
+  for (const line of wrap(finding.because, Math.max(40, width - 6))) {
+    lines.push(`    ${c.dim(line)}`);
+  }
 
   if (finding.caveats.length > 0) {
     for (const hit of finding.caveats.slice(0, 3)) {
